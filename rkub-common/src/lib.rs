@@ -13,8 +13,11 @@ pub enum ServerMessage {
     JoinedRoom {
         room_name: String,
         players: Vec<String>,
+        pieces: Vec<Piece>,
     },
-    StartGame(usize),
+    StartGame,
+    PlayerJoined(String),
+    GameAlreadyStarted(String),
 }
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]

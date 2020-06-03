@@ -41,21 +41,47 @@ struct Room {
 }
 
 impl Room {
+    pub fn has_started(&self) -> bool {
+        self.started
+    }
+
     pub fn on_message(&mut self, addr: SocketAddr, msg: ClientMessage) -> bool {
         info!("[{}] message: {:?}", addr, msg);
 
         true
     }
 
-    pub fn add_player(
+    pub async fn add_player(
         &mut self,
         addr: SocketAddr,
         name: &str,
         ws_sender: Sender<ServerMessage>,
     ) -> anyhow::Result<()> {
+        if self.has_started() {
+            ws_sender.send(ServerMessage::GameAlreadyStarted(self.name.clone())).await?;
+        }
+        
         let hand = self.game.deal(14);
-        let player = Player::new(name.to_string(), hand);
-        // self.connections[addr]
+        let player = Player::new(name.to_string(), hand, ws_sender.clone());
+   
+        self.broadcast(ServerMessage::PlayerJoined(name.to_string())).await?;
+
+        ws_sender.send(ServerMessage::JoinedRoom {
+            room_name: self.name.clone(),
+            players: self.players.iter().map(|p| p.name.clone()).collect(),
+            pieces: player.pieces.clone(),
+        }).await?;
+        
+        self.players.push(player);
+        self.connections.insert(addr, self.players.len() - 1);
+     
+        Ok(())
+    }
+
+    pub async fn broadcast(&self, msg: ServerMessage) -> anyhow::Result<()> {
+        for idx in self.connections.values() {
+            self.players[*idx].sender.send(msg.clone()).await?;
+        }
 
         Ok(())
     }
@@ -66,13 +92,15 @@ type Rooms = Lock<HashMap<String, RoomHandle>>;
 pub struct Player {
     name: String,
     pieces: Vec<Piece>,
+    sender: Sender<ServerMessage>,
 }
 
 impl Player {
-    pub fn new(name: String, pieces: Vec<Piece>) -> Self {
+    pub fn new(name: String, pieces: Vec<Piece>, sender: Sender<ServerMessage>) -> Self {
         Self {
             name,
             pieces: Vec::new(),
+            sender,
         }
     }
 }
@@ -82,14 +110,16 @@ async fn run_player(
     name: String,
     stream: WebSocketStream<Async<TcpStream>>,
     handle: RoomHandle,
-) {
+) -> anyhow::Result<()> {
     let (incoming, outgoing) = stream.split();
     let (ws_tx, ws_rx) = unbounded();
 
     {
         let mut room = handle.room.lock().await;
-        room.add_player(addr, &name, ws_tx);
+        room.add_player(addr, &name, ws_tx).await?;
     }
+
+    Ok(())
 }
 
 async fn handle_connection(
