@@ -11,10 +11,21 @@ crate-type = ["cdylib", "rlib"]
 default = ["console_error_panic_hook", "wee_alloc"]
 
 [dependencies]
-wasm-bindgen = "*"
-wasm-bindgen-futures = "*"
-
+rkub-common = { path = "../rkub-common" }
 serde_json = "*"
+chrono = { version = "*", features = ["wasmbind"] }
+
+wasm-bindgen = { version = "*", features = ["serde-serialize"] }
+wasm-bindgen-futures = "*"
+# wasm_svg_graphics = "1.0.2"
+wasm_svg_graphics = { path = "../../WasmSVGGraphics" }
+
+wasm-logger = "*"
+log = "*"
+lazy_static = "*"
+
+rand = "*"
+
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires
@@ -33,6 +44,7 @@ wee_alloc = { version = "0.4.5", optional = true }
 version = "*"
 features = [
   'AddEventListenerOptions',
+  'Attr',
   'Blob',
   'console',
   'Document',
@@ -43,9 +55,11 @@ features = [
   'HtmlElement',
   'HtmlButtonElement',
   'HtmlInputElement',
+  'HtmlCollection',
   'KeyboardEvent',
   'Location',
   'MessageEvent',
+  'NamedNodeMap',
   'Node',
   'NodeList',
   'Performance',

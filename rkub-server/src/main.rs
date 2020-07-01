@@ -7,7 +7,7 @@ use rkub_common::{ClientMessage, Game, Piece, ServerMessage};
 
 use async_channel::{unbounded, Receiver, Sender};
 use async_lock::{Lock, LockGuard};
-use futures::{join, StreamExt};
+use futures::{join, SinkExt, StreamExt};
 use smol::Async;
 
 use async_tungstenite::{accept_async, WebSocketStream};
@@ -22,6 +22,7 @@ struct RoomHandle {
 }
 
 async fn run_room(handle: RoomHandle, mut read: Receiver<TaggedClientMessage>) {
+    info!("Running Room: {}", handle.room.lock().await.name);
     while let Some((addr, msg)) = read.next().await {
         if !handle.room.lock().await.on_message(addr, msg) {
             break;
@@ -48,6 +49,15 @@ impl Room {
     pub fn on_message(&mut self, addr: SocketAddr, msg: ClientMessage) -> bool {
         info!("[{}] message: {:?}", addr, msg);
 
+        let player = &self.players[self.connections[&addr]];
+
+        match msg {
+            ClientMessage::Ping => {
+                player.sender.send(ServerMessage::Pong);
+            }
+            _ => {},
+        }
+
         true
     }
 
@@ -58,23 +68,28 @@ impl Room {
         ws_sender: Sender<ServerMessage>,
     ) -> anyhow::Result<()> {
         if self.has_started() {
-            ws_sender.send(ServerMessage::GameAlreadyStarted(self.name.clone())).await?;
+            ws_sender
+                .send(ServerMessage::GameAlreadyStarted(self.name.clone()))
+                .await?;
         }
-        
+
         let hand = self.game.deal(14);
         let player = Player::new(name.to_string(), hand, ws_sender.clone());
-   
-        self.broadcast(ServerMessage::PlayerJoined(name.to_string())).await?;
 
-        ws_sender.send(ServerMessage::JoinedRoom {
-            room_name: self.name.clone(),
-            players: self.players.iter().map(|p| p.name.clone()).collect(),
-            pieces: player.pieces.clone(),
-        }).await?;
-        
+        self.broadcast(ServerMessage::PlayerJoined(name.to_string()))
+            .await?;
+
+        ws_sender
+            .send(ServerMessage::JoinedRoom {
+                room_name: self.name.clone(),
+                players: self.players.iter().map(|p| p.name.clone()).collect(),
+                pieces: player.pieces.clone(),
+            })
+            .await?;
+
         self.players.push(player);
         self.connections.insert(addr, self.players.len() - 1);
-     
+
         Ok(())
     }
 
@@ -135,6 +150,11 @@ async fn handle_connection(
         let message: ClientMessage = serde_json::from_str(&t)?;
 
         match message {
+            ClientMessage::Ping => {
+                info!("[{}] {:?}", addr, ClientMessage::Ping);
+                ws.send(Message::Text(serde_json::to_string(&ServerMessage::Pong)?))
+                    .await?;
+            }
             ClientMessage::CreateRoom(name) => {
                 info!("[{}] creating room for: {}", addr, name);
 
@@ -205,6 +225,8 @@ async fn new_room_and_id(
 fn main() -> anyhow::Result<()> {
     env_logger::try_init()?;
 
+    info!("Server Starting");
+
     // Create our thread pool:
     for _ in 0..4 {
         std::thread::spawn(|| smol::run(futures::future::pending::<()>()));
@@ -214,7 +236,9 @@ fn main() -> anyhow::Result<()> {
     let rooms = Rooms::default();
 
     smol::block_on(async {
-        let listener = Async::<TcpListener>::bind(addr).unwrap();
+        let listener = Async::<TcpListener>::bind(&addr).unwrap();
+
+        info!("Binding to: {}", addr);
 
         while let Ok((stream, addr)) = listener.accept().await {
             let rc = rooms.clone();

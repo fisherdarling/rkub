@@ -1,0 +1,71 @@
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+body, html {
+    margin: 0;
+    padding: 0;
+    font-size: 16px;
+    font-family: sans-serif;
+}
+
+.container {
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    align-items: stretch;
+    flex-flow: row wrap;
+}
+
+div#extra {
+    flex-grow: 1;
+}
+
+div#board {
+    border: 3px solid red;
+    height: 75vh;
+    width: 75vw;
+    position: relative;
+}
+
+div#board_svg {
+    z-index: 0;
+}
+
+div#hand {
+    border: 3px solid blue;
+    height: calc(100%);
+    /* height: calc(20%);
+    width: calc(40%); */
+    /* position: absolute;
+    right: 0px;
+    z-index: 1; */
+}
+
+div#players {
+    border: 3px solid green;
+    height: calc(50%);
+    flex-grow: 1;
+}
+
+div#chat {
+    border: 3px solid black;
+    height: calc(50%);
+    flex-grow: 1;
+}
+
+.piece_text {
+    font-family: 'Roboto Mono', monospace;
+    paint-order: stroke;
+    stroke-width: 1px;
+    font-weight: bold;
+    font-size: large;
+    stroke: black;
+    stroke-linejoin: round;
+}
+
+.piece_tile {
+    fill: #ffda61;
+    border-radius: 10px;
+    stroke: black;
+}

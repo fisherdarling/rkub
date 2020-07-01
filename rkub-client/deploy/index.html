@@ -1,8 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rummikub</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@500&display=swap" rel="stylesheet">
     <script type="module">
         import init from "./rkub_client.js";
         import { run } from "./rkub_client.js";
@@ -10,15 +14,39 @@
         async function start() {
             await init();
             let handle = run();
-            console.log(handle);
         }
-        console.log("here");
+        console.log("Executing WASM start()");
         start();
     </script>
 </head>
+
 <body>
-    <div id="board">
-        Main Board
+    <div id="create_or_join" hidden>
+        <button id="join_button">
+            Join Lobby
+        </button>
     </div>
+
+    <div id="connecting" hidden>
+        Connecting
+    </div>
+
+    <div id="playing" hidden>
+        <div class="container">
+            <div id="game">
+                <div id="board">
+                </div>
+                <div id="hand">
+                    <p>Hand</p>
+                </div>
+            </div>
+            <div id="extra">
+                <div id="players">Players</div>
+                <div id="chat">Chat</div>
+            </div>
+        </div>
+    </div>
+    
 </body>
+
 </html>

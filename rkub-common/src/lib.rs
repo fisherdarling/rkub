@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ClientMessage {
     CreateRoom(String),
     JoinRoom(String, String),
     Ready(String),
+    Ping,
 }
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
@@ -18,6 +20,7 @@ pub enum ServerMessage {
     StartGame,
     PlayerJoined(String),
     GameAlreadyStarted(String),
+    Pong,
 }
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
@@ -28,6 +31,20 @@ pub enum Color {
     Yellow = 2,
     Black = 3,
     Joker = 4,
+}
+
+impl fmt::Display for Color {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let string = match self {
+            Color::Red => "red",
+            Color::Blue => "blue",
+            Color::Yellow => "yellow",
+            Color::Black => "black",
+            Color::Joker => "n/a",
+        };
+
+        write!(f, "{}", string)
+    }
 }
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
