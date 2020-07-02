@@ -131,7 +131,6 @@ pub struct Playing {
     pub players: Vec<String>,
     pub hand: Vec<Piece>,
     pub board_div: Element,
-    pub hand_div: Element,
     pub chat_div: Element,
     pub players_div: Element,
 }
@@ -147,8 +146,6 @@ impl Playing {
 
         // Setup websocket message handling:
         set_event_cb(&ws, "message", move |e: MessageEvent| {
-            // console_log!("js ")
-            // let target = e.target().expect("could not get message target");
             let msg: ServerMessage = serde_json::from_str(&e.data().as_string().unwrap())
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
             crate::on_message(msg)
@@ -157,8 +154,6 @@ impl Playing {
 
         // Setup websocket message handling:
         set_event_cb(&ws, "error", move |e: Event| {
-            // console_log!("js ")
-            // let target = e.target().expect("could not get message target");
             console_log!("WS Error: {:?}", e);
             Ok(())
         })
@@ -166,22 +161,19 @@ impl Playing {
 
         // Setup websocket message handling:
         set_event_cb(&ws, "close", move |e: Event| {
-            // console_log!("js ")
-            // let target = e.target().expect("could not get message target");
             console_log!("WS Closed: {:?}", e);
             Ok(())
         })
         .forget();
         
         let board_div = global.doc.get_element_by_id("board").unwrap();
-        let hand_div = global.doc.get_element_by_id("hand").unwrap();
         let chat_div = global.doc.get_element_by_id("chat").unwrap();
         let players_div = global.doc.get_element_by_id("players").unwrap();
         
         console_log!("sending join message");
 
-        // let join_message = serde_json::to_string(&ClientMessage::CreateRoom("fisher".to_string())).unwrap();
-        // ws.send_with_str(&join_message)?;
+        let join_message = serde_json::to_string(&ClientMessage::CreateRoom("fisher".to_string())).unwrap();
+        ws.send_with_str(&join_message)?;
 
         Ok(Self {
             ws,
@@ -191,7 +183,6 @@ impl Playing {
             players: Vec::new(),
             hand: Vec::new(),
             board_div,
-            hand_div,
             chat_div,
             players_div,
         })
@@ -204,7 +195,7 @@ impl Playing {
         self.players = players;
         self.hand = hand;
 
-        console_log!("[{}]\n{:?}\n{:?}", self.room_name, self.players, self.hand);
+        console_log!("[{}] {:?} pieces, {:?}", self.room_name, self.hand.len(), self.players);
 
         Ok(())
     }
@@ -224,7 +215,6 @@ pub enum State {
 }
 
 impl State {
-    // trace_macros!(true);
     transitions!(
         Connecting => [
             on_connected() -> Playing,
@@ -233,7 +223,6 @@ impl State {
             on_join_start() -> Connecting,
         ]
     );
-    // trace_macros!(false);
 
     methods!(
         Playing => [

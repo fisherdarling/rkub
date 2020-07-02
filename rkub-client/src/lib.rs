@@ -2,6 +2,7 @@ mod board;
 mod states;
 mod svg;
 mod utils;
+mod piece_view;
 
 use chrono::{DateTime, Utc};
 use log::*;
@@ -46,12 +47,14 @@ where
     T: FromWasmAbi + 'static,
 {
     let cb = build_cb(f);
+    
     let target = obj
         .dyn_ref::<EventTarget>()
         .expect("Could not convert into `EventTarget`");
     target
         .add_event_listener_with_callback(name, cb.as_ref().unchecked_ref())
         .expect("Could not add event listener");
+
     cb
 }
 
@@ -72,11 +75,9 @@ fn timestamp() -> String {
 }
 
 fn on_message(msg: ServerMessage) -> JsResult<()> {
-    console_log!("Message: {:?}", msg);
-
     match msg {
-        ServerMessage::JoinedRoom { room_name, players, pieces } => {
-            crate::STATE.lock().unwrap().on_joined_room(room_name, players, pieces)
+        ServerMessage::JoinedRoom { room_name, players, hand } => {
+            crate::STATE.lock().unwrap().on_joined_room(room_name, players, hand)
         }
         ServerMessage::Pong => {
             console_log!("Server: Pong");
@@ -113,7 +114,7 @@ pub fn run() -> JsResult<()> {
 pub fn create_heartbeat() -> JsResult<()> {
     console_log!("Creating Heartbeat");
     let heartbeat = Closure::wrap(Box::new(|| {
-        console_log!("Ping");
+        console_log!("Client: Ping");
         {
             let mut lock = STATE.lock().unwrap();
             lock.send_ping().unwrap();

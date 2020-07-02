@@ -23,23 +23,9 @@ div#extra {
 
 div#board {
     border: 3px solid red;
-    height: 75vh;
+    height: 100vh;
     width: 75vw;
     position: relative;
-}
-
-div#board_svg {
-    z-index: 0;
-}
-
-div#hand {
-    border: 3px solid blue;
-    height: calc(100%);
-    /* height: calc(20%);
-    width: calc(40%); */
-    /* position: absolute;
-    right: 0px;
-    z-index: 1; */
 }
 
 div#players {

@@ -24,13 +24,11 @@ struct RoomHandle {
 async fn run_room(handle: RoomHandle, mut read: Receiver<TaggedClientMessage>) {
     info!("Running Room: {}", handle.room.lock().await.name);
     while let Some((addr, msg)) = read.next().await {
-        if !handle.room.lock().await.on_message(addr, msg) {
+        if !handle.room.lock().await.on_message(addr, msg).await {
             break;
         }
     }
 }
-
-#[derive(Default)]
 struct Room {
     name: String,
     started: bool,
@@ -42,20 +40,41 @@ struct Room {
 }
 
 impl Room {
+    pub fn new() -> Self {
+        let game = Game::new();
+
+        Room {
+            name: String::new(),
+            started: false,
+            ended: false,
+            connections: HashMap::new(),
+            players: Vec::new(),
+            active_player: 0,
+            game,
+        }
+    }
+
     pub fn has_started(&self) -> bool {
         self.started
     }
 
-    pub fn on_message(&mut self, addr: SocketAddr, msg: ClientMessage) -> bool {
+    pub async fn on_message(&mut self, addr: SocketAddr, msg: ClientMessage) -> bool {
         info!("[{}] message: {:?}", addr, msg);
 
         let player = &self.players[self.connections[&addr]];
 
         match msg {
             ClientMessage::Ping => {
-                player.sender.send(ServerMessage::Pong);
+                if let Err(_) = player.sender.send(ServerMessage::Pong).await {
+                    panic!("Error sending to player");
+                }
             }
-            _ => {},
+            ClientMessage::Close => {
+                info!("[{}] closed", addr);
+                // let idx = self.connections.remove(&addr).unwrap();
+                // self.players.remove(idx);
+            }
+            _ => {}
         }
 
         true
@@ -74,20 +93,21 @@ impl Room {
         }
 
         let hand = self.game.deal(14);
-        let player = Player::new(name.to_string(), hand, ws_sender.clone());
+        let player = Player::new(name.to_string(), hand.clone(), ws_sender.clone());
 
         self.broadcast(ServerMessage::PlayerJoined(name.to_string()))
             .await?;
+
+        self.players.push(player);
 
         ws_sender
             .send(ServerMessage::JoinedRoom {
                 room_name: self.name.clone(),
                 players: self.players.iter().map(|p| p.name.clone()).collect(),
-                pieces: player.pieces.clone(),
+                hand,
             })
             .await?;
 
-        self.players.push(player);
         self.connections.insert(addr, self.players.len() - 1);
 
         Ok(())
@@ -106,15 +126,15 @@ type Rooms = Lock<HashMap<String, RoomHandle>>;
 
 pub struct Player {
     name: String,
-    pieces: Vec<Piece>,
+    hand: Vec<Piece>,
     sender: Sender<ServerMessage>,
 }
 
 impl Player {
-    pub fn new(name: String, pieces: Vec<Piece>, sender: Sender<ServerMessage>) -> Self {
+    pub fn new(name: String, hand: Vec<Piece>, sender: Sender<ServerMessage>) -> Self {
         Self {
             name,
-            pieces: Vec::new(),
+            hand,
             sender,
         }
     }
@@ -126,13 +146,45 @@ async fn run_player(
     stream: WebSocketStream<Async<TcpStream>>,
     handle: RoomHandle,
 ) -> anyhow::Result<()> {
-    let (incoming, outgoing) = stream.split();
+    info!("[{}] run player: {}", addr, name);
+    
+    let (mut outgoing, mut incoming) = stream.split();
     let (ws_tx, ws_rx) = unbounded();
 
     {
         let mut room = handle.room.lock().await;
         room.add_player(addr, &name, ws_tx).await?;
     }
+
+    let server_to_client: smol::Task<anyhow::Result<()>> = smol::Task::spawn(async move {
+        while let Ok(message) = ws_rx.recv().await {
+            let json = serde_json::to_string(&message)?;
+            outgoing.send(Message::Text(json)).await?;
+        }
+
+        Ok(())
+    });
+
+    let server_write = handle.send.clone();
+    let client_to_server: smol::Task<anyhow::Result<()>> = smol::Task::spawn(async move {
+        while let Some(message) = incoming.next().await.transpose()? {
+            match message {
+                Message::Text(json) => {
+                    let message: ClientMessage = serde_json::from_str(&json)?;
+                    server_write.send((addr, message)).await;
+                }
+                _ => {},
+            }
+        };
+
+        server_write.send((addr, ClientMessage::Close)).await;
+
+        Ok(())
+    });
+
+    info!("[{}] joining streams for: {}", addr, name);
+    let (_s2c_e, _c2s_e) = join!(server_to_client, client_to_server);
+    info!("[{}] finished streams for: {}", addr, name);
 
     Ok(())
 }
@@ -162,7 +214,7 @@ async fn handle_connection(
                 let (send, recv) = unbounded();
 
                 // Create a new room and get its id:
-                let room = Lock::new(Room::default());
+                let room = Lock::new(Room::new());
                 let handle = RoomHandle { send, room };
 
                 let new_id = {

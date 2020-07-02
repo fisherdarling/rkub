@@ -8,6 +8,7 @@ pub enum ClientMessage {
     JoinRoom(String, String),
     Ready(String),
     Ping,
+    Close,
 }
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
@@ -15,7 +16,7 @@ pub enum ServerMessage {
     JoinedRoom {
         room_name: String,
         players: Vec<String>,
-        pieces: Vec<Piece>,
+        hand: Vec<Piece>,
     },
     StartGame,
     PlayerJoined(String),

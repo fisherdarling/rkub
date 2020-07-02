@@ -1,19 +1,14 @@
 use wasm_svg_graphics::prelude::*;
+use std::collections::HashMap;
 
 use crate::svg::AsSVG;
 use rkub_common::{Color, Piece, Game};
 
-
-// const GRID_LENGTH: usize = 120;
-// const GRID_SIZE: usize = 120;
-// const COUNT_WIDTH: usize = 35;
-// const COUNT_HEIGHT: usize = 27;
-// const CELL_WIDTH: usize = width / COUNT_WIDTH + 1;
-// const CELL_HEIGHT: usize = height / COUNT_HEIGHT + 1;
-const CELL_WIDTH: usize = 80;
-const CELL_HEIGHT: usize = 100;
+const CELL_WIDTH: usize = 40;
+const CELL_HEIGHT: usize = 50;
 
 pub struct Board {
+    grid: HashMap<(i32, i32), Piece>,
     played_pieces: Vec<LocatedPiece>,
     renderer: SVGRenderer,
 }
@@ -25,10 +20,11 @@ impl Board {
 
         let width = board.client_width();
         let height = board.client_height();
-        let mut renderer = SVGRenderer::new("board").expect("Unable to create renderer");
+        let renderer = SVGRenderer::new("board").expect("Unable to create renderer");
         renderer.adjust_viewbox(0, 0, width, height);
 
         Self {
+            grid: HashMap::new(),
             played_pieces: Vec::new(),
             renderer,
         }
@@ -57,29 +53,6 @@ impl Board {
             }
         }
     }
-
-    // pub fn create_everything() -> Self {
-    //     let pieces = Game::create_pieces();
-    //     let mut located_pieces = Vec::with_capacity(pieces.len());
-
-    //     let xs = 0..13;
-    //     let ys = 0..4;
-    //     let cross = ys.flat_map(|y| xs.clone().map(move |x| (x, y)));
-        
-    //     for ((i, j), piece) in cross.into_iter().zip(pieces.into_iter()) {
-    //         let located = LocatedPiece {
-    //             x: (i * CELL_WIDTH) as f32,
-    //             y: (j * CELL_HEIGHT) as f32,
-    //             piece,
-    //         };
-
-    //         located_pieces.push(located);
-    //     }
-
-    //     Self {
-    //         played_pieces: located_pieces
-    //     }
-    // }
 }
 
 #[derive(Debug)]
@@ -109,9 +82,9 @@ impl AsSVG for Piece {
 
         let num = SVGElem::new(Tag::Text)
             .set(Attr::Fill, color)
-            .set(Attr::Transform, "scale(1, 3)")
+            .set(Attr::Transform, "scale(1, 2)")
             .set(Attr::X, CELL_WIDTH / 2)
-            .set(Attr::Y, CELL_HEIGHT / 6)
+            .set(Attr::Y, CELL_HEIGHT / 4)
             .set(Attr::DominantBaseline, "central")
             .set(Attr::TextAnchor, "middle")
             .set(Attr::Class, "piece_text")
