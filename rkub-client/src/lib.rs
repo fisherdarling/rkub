@@ -67,7 +67,7 @@ extern "C" {
 
 #[macro_export]
 macro_rules! console_log {
-    ($($t:tt)*) => (log(&format!("[{}] {}", timestamp(), &format_args!($($t)*).to_string())))
+    ($($t:tt)*) => (crate::log(&format!("[{}] {}", crate::timestamp(), &format_args!($($t)*).to_string())))
 }
 
 fn timestamp() -> String {

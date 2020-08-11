@@ -7,7 +7,7 @@ use crate::{JsError, JsResult};
 use rkub_common::Piece;
 
 pub trait AsSVG {
-    fn as_svg(&self) -> SVGElem;
+    fn as_svg(&self, width: i32, height: i32) -> SVGElem;
 }
 
 

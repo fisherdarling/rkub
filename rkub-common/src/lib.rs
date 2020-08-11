@@ -50,13 +50,13 @@ impl fmt::Display for Color {
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Piece {
-    pub num: u8,
     pub color: Color,
+    pub num: u8,
 }
 
 impl Piece {
     pub fn new(color: Color, num: u8) -> Self {
-        Self { num, color }
+        Self { color, num }
     }
 
     pub fn joker() -> Self {
