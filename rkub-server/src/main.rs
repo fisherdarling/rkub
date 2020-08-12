@@ -74,6 +74,52 @@ impl Room {
                 // let idx = self.connections.remove(&addr).unwrap();
                 // self.players.remove(idx);
             }
+            ClientMessage::PlayedPieces(board, mut hand) => {                
+                if self.connections[&addr] != self.active_player {
+                    info!("[{}] player tried to make a turn when it wasn't their turn", addr);
+                    return true;
+                }
+                
+                let (is_valid, groups) = Game::is_valid_board(&board);
+                info!("[{}] valid play? {}, groups: {}", addr, is_valid, groups.len());
+
+                if !is_valid {
+                    let msg = ServerMessage::InvalidPlay(board);
+                    self.players[self.connections[&addr]].send_msg(msg).await;
+                    
+                    return true;
+                }
+
+                let player = &mut self.players[self.connections[&addr]];
+                
+                hand.sort();
+                player.hand_mut().sort();
+
+                // There was no hand change, player has to draw a piece:
+                let mut drew = false;
+                if hand == *player.hand_mut() {
+                    if let Some(piece) = self.game.deal_piece() {
+                        player.add_to_hand(piece);
+                        player.send_msg(ServerMessage::DrawPiece(piece)).await;
+                        drew = true;
+                    }
+                }
+                let ending_player = player.name.clone();
+
+                self.game.set_board(board.clone());
+                self.active_player = (self.active_player + 1) % self.players.len();
+                let next_player = &self.players[self.active_player];
+
+                let msg = ServerMessage::TurnFinished {
+                    ending_player,
+                    ending_drew: drew,
+                    next_player: next_player.name.clone(),
+                    pieces_remaining: self.game.remaining_pieces().len(),
+                    board,
+                };
+
+                self.broadcast(msg).await;
+            }
             _ => {}
         }
 
@@ -92,7 +138,9 @@ impl Room {
                 .await?;
         }
 
-        let hand = self.game.deal(14);
+        // let hand = self.game.deal(14);
+        
+        let hand = self.game.deal(28);
         let player = Player::new(name.to_string(), hand.clone(), ws_sender.clone());
 
         self.broadcast(ServerMessage::PlayerJoined(name.to_string()))
@@ -137,6 +185,18 @@ impl Player {
             hand,
             sender,
         }
+    }
+
+    pub async fn send_msg(&mut self, msg: ServerMessage) {
+        self.sender.send(msg).await;
+    }
+
+    pub fn add_to_hand(&mut self, piece: Piece) {
+        self.hand.push(piece);
+    }
+
+    pub fn hand_mut(&mut self) -> &mut Vec<Piece> {
+        &mut self.hand
     }
 }
 

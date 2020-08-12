@@ -78,6 +78,12 @@ fn on_message(msg: ServerMessage) -> JsResult<()> {
         ServerMessage::JoinedRoom { room_name, players, hand } => {
             crate::STATE.lock().unwrap().on_joined_room(room_name, players, hand)
         }
+        ServerMessage::TurnFinished {
+            ending_player, ending_drew, next_player,
+            pieces_remaining, played_pieces
+        } => {
+            crate::STATE.lock().unwrap().on_turn_finished(ending_player, ending_drew, next_player, pieces_remaining, played_pieces)
+        }
         ServerMessage::Pong => {
             console_log!("Server: Pong");
             Ok(())

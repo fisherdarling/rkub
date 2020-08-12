@@ -1,5 +1,5 @@
 use wasm_svg_graphics::prelude::*;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use crate::svg::AsSVG;
 use rkub_common::{Color, Piece, Game};
@@ -11,7 +11,7 @@ const COLS: i32 = 25;
 const ROWS: i32 = 20;
 
 pub struct Board {
-    grid: HashMap<(i32, i32), Piece>,
+    grid: BTreeMap<(i32, i32), Piece>,
     // played_pieces: Vec<LocatedPiece>,
     // hand_pieces: Vec<LocatedPiece>,
     renderer: SVGRenderer,
@@ -31,7 +31,7 @@ impl Board {
         renderer.adjust_viewbox(0, 0, width, height);
 
         Self {
-            grid: HashMap::new(),
+            grid: BTreeMap::new(),
             // played_pieces: Vec::new(),
             // hand_pieces: Vec::new(),
             renderer,
@@ -39,6 +39,28 @@ impl Board {
             cell_height: height / ROWS,
             last_highlight: None,
         }
+    }
+
+    pub fn resize(&mut self) {
+        let document = web_sys::window().unwrap().document().unwrap();
+        let board = document.get_element_by_id("board").unwrap();
+
+        let width = board.client_width();
+        let height = board.client_height();
+
+        self.cell_width = width / COLS;
+        self.cell_height = height / ROWS;
+
+        self.renderer.adjust_viewbox(0, 0, width, height);
+        self.rerender();
+    }
+
+    pub fn grid(&self) -> &BTreeMap<(i32, i32), Piece> {
+        &self.grid
+    }
+
+    pub fn played_grid(&self) -> BTreeMap<(i32, i32), Piece> {
+        self.grid.iter().filter(|((x, y), _)| *y < ROWS - 5).map(|((x, y), p)| ((*x, *y), *p)).collect()
     }
 
     pub fn render(&mut self) {
@@ -104,6 +126,10 @@ impl Board {
         let grid_y = world_y / self.cell_height;
 
         self.grid.contains_key(&(grid_x, grid_y))    
+    }
+
+    pub fn world_to_grid(&self, world_x: i32, world_y: i32) -> (i32, i32) {
+        (world_x / self.cell_width, world_y / self.cell_height)
     }
 
     pub fn world_render_highlight(&mut self, world_x: i32, world_y: i32, piece: &Piece) {

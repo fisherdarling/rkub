@@ -1,11 +1,11 @@
-use std::sync::Mutex;
+use std::collections::BTreeMap;
 use wasm_bindgen::prelude::*;
 use web_sys::{Document, Element, MessageEvent, MouseEvent, WebSocket, Window, Event, PointerEvent};
 
 use crate::STATE;
 use crate::board::Board;
 use crate::{console_log, log, set_event_cb, timestamp};
-use rkub_common::{ClientMessage, Color, Piece, ServerMessage};
+use rkub_common::{ClientMessage, Color, Piece, ServerMessage, Game};
 
 type JsResult<T> = Result<T, JsValue>;
 type JsError = Result<(), JsValue>;
@@ -83,6 +83,7 @@ impl CreateOrJoin {
 
         Connecting::new(self.global)
     }
+
 }
 
 #[derive(Debug)]
@@ -130,7 +131,7 @@ pub struct Playing {
     pub board: Board,
     pub room_name: String,
     pub is_turn: bool,
-    pub pieces_placed: u8,
+    // pub played_pieces: BTreeMap<(i32, i32), Piece>,
     pub players: Vec<String>,
     pub hand: Vec<Piece>,
     pub selected_piece: Option<Piece>,
@@ -139,7 +140,8 @@ pub struct Playing {
     pub players_div: Element,
     pub on_board_click: JsClosure<PointerEvent>,
     pub on_board_move: JsClosure<PointerEvent>,
-    pub on_end_turn: JsClosure<PointerEvent>
+    pub on_end_turn: JsClosure<PointerEvent>,
+    pub on_window_resize: JsClosure<Event>
 }
 
 impl Playing {
@@ -197,6 +199,12 @@ impl Playing {
             e.prevent_default();
             STATE.lock().unwrap().on_end_turn()
         });
+
+        let window = &global.window;
+        let on_window_resize = set_event_cb(window, "resize", move |e: Event| {
+            e.prevent_default();
+            STATE.lock().unwrap().on_window_resize()
+        });
         
         console_log!("sending join message");
 
@@ -209,7 +217,7 @@ impl Playing {
             board,
             room_name: String::new(),
             is_turn: true,
-            pieces_placed: 0,
+            // played_pieces: BTreeMap::new(),
             players: Vec::new(),
             hand: Vec::new(),
             selected_piece: None,
@@ -219,6 +227,7 @@ impl Playing {
             on_board_click,
             on_board_move,
             on_end_turn,
+            on_window_resize,
         })
     }
 
@@ -256,12 +265,13 @@ impl Playing {
                 console_log!("piece already there");
             } else {
                 let in_hand = self.board.world_insert(x, y, piece);
-    
+                let location = self.board.world_to_grid(x, y);
+
                 if in_hand {
                     self.hand.push(piece);
-                    self.pieces_placed -= 1;
+                    // self.played_pieces.remove(&location);
                 } else {
-                    self.pieces_placed += 1;
+                    // self.played_pieces.insert(location, piece);
                 }
     
                 self.selected_piece = None;
@@ -299,7 +309,40 @@ impl Playing {
     fn on_end_turn(&mut self) -> JsResult<()> {
         console_log!("on_end_turn");
 
+        let played = self.board.played_grid();
+        let (is_valid, groups) = Game::is_valid_board(&played);
+        console_log!("Grid valid?: {:?}", is_valid);
+        console_log!("Groups: {:?}", groups);
+
+        if !is_valid {
+            self.global.window.alert_with_message("Cannot end turn, the board is currently invalid.")?;
+            return Ok(())
+        }
+
+        // TODO: Method for describing what the player added to their hand!
+        let played_grid = self.board.played_grid();
+        self.send_message(ClientMessage::PlayedPieces(played_grid))
+    }
+
+    fn on_turn_finished(&mut self, ending_player: String, ending_drew: bool, next_player: String, pieces_remaining: usize, played_pieces: BTreeMap<(i32, i32), Piece>) -> JsResult<()> {
+        console_log!("Turn Finished for {}", ending_player);
+        console_log!("{} drew? {}", ending_player, ending_drew);
+        console_log!("{} is the next player", next_player);
+        console_log!("There are {} pieces remaining", pieces_remaining);
+        console_log!("{} played these pieces: {:?}", ending_player, played_pieces);
+
+        Ok(())    
+    }
+
+    pub fn on_window_resize(&mut self) -> JsResult<()> {
+        console_log!("resize");
+        self.board.resize();
         Ok(())
+    }
+
+    fn send_message(&mut self, msg: ClientMessage) -> JsResult<()> {
+        let msg = serde_json::to_string(&msg).unwrap();
+        self.ws.send_with_str(&msg)
     }
 
     pub fn send_ping(&mut self) -> JsResult<()> {
@@ -336,7 +379,9 @@ impl State {
             on_joined_room(room_name: String, players: Vec<String>, hand: Vec<Piece>),
             on_board_click(x: i32, y: i32),
             on_board_move(x: i32, y: i32),
+            on_turn_finished(ending_player: String, ending_drew: bool, next_player: String, pieces_remaining: usize, played_pieces: BTreeMap<(i32, i32), Piece>),
             on_end_turn(),
+            on_window_resize(),
         ]
     );
 }
