@@ -11,7 +11,7 @@ body, html {
 
 .container {
     overflow: hidden;
-    height: 100vh;
+    height: calc(100%);
     display: flex;
     align-items: stretch;
     flex-flow: row wrap;
@@ -19,6 +19,8 @@ body, html {
 
 div#extra {
     flex-grow: 1;
+    display: flex;
+    flex-direction: column;
 }
 
 div#board {
@@ -30,14 +32,25 @@ div#board {
 
 div#players {
     border: 3px solid green;
-    height: calc(50%);
-    flex-grow: 1;
+    /* height: calc(45%); */
+    display: flex;
+    flex-grow: 7;
+}
+
+div#end_turn {
+    border: 3px solid red;
+    text-align: center;
+    background-color: rgb(36, 209, 36);
+    user-select: none;
+    font-size: 40px;
+    /* flex-grow: 1; */
 }
 
 div#chat {
     border: 3px solid black;
-    height: calc(50%);
-    flex-grow: 1;
+    /* height: calc(45%); */
+    /* display: flex; */
+    flex-grow: 7;
 }
 
 .piece_text {
@@ -48,10 +61,12 @@ div#chat {
     font-size: large;
     stroke: black;
     stroke-linejoin: round;
+    user-select: none;
 }
 
 .piece_tile {
     fill: #ffda61;
     border-radius: 10px;
     stroke: black;
+    user-select: none;
 }

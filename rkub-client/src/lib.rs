@@ -12,7 +12,6 @@ use wasm_bindgen::{convert::FromWasmAbi, JsCast};
 use web_sys::{
     Document, Element, EventTarget, FileReader, MessageEvent, ProgressEvent, WebSocket, Window,
 };
-// use web_sys::console::log_1;s
 
 use crate::states::*;
 use crate::svg::AsSVG;

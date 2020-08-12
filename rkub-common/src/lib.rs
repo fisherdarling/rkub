@@ -48,7 +48,7 @@ impl fmt::Display for Color {
     }
 }
 
-#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Piece {
     pub color: Color,
     pub num: u8,
@@ -61,6 +61,13 @@ impl Piece {
 
     pub fn joker() -> Self {
         Piece::new(Color::Joker, std::u8::MAX)
+    }
+}
+
+impl fmt::Debug for Piece {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let color = self.color.to_string().chars().next().unwrap();
+        write!(f, "{}{}", color.to_ascii_uppercase(), self.num)
     }
 }
 

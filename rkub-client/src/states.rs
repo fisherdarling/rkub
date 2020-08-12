@@ -130,6 +130,7 @@ pub struct Playing {
     pub board: Board,
     pub room_name: String,
     pub is_turn: bool,
+    pub pieces_placed: u8,
     pub players: Vec<String>,
     pub hand: Vec<Piece>,
     pub selected_piece: Option<Piece>,
@@ -137,6 +138,8 @@ pub struct Playing {
     pub chat_div: Element,
     pub players_div: Element,
     pub on_board_click: JsClosure<PointerEvent>,
+    pub on_board_move: JsClosure<PointerEvent>,
+    pub on_end_turn: JsClosure<PointerEvent>
 }
 
 impl Playing {
@@ -180,7 +183,19 @@ impl Playing {
 
         let svg = board_div.get_elements_by_tag_name("svg").item(0).unwrap();
         let on_board_click = set_event_cb(&svg, "click", move |e: PointerEvent| {
+            e.prevent_default();
             STATE.lock().unwrap().on_board_click(e.x(), e.y())
+        });
+
+        let on_board_move = set_event_cb(&svg, "mousemove", move |e: PointerEvent| {
+            e.prevent_default();
+            STATE.lock().unwrap().on_board_move(e.x(), e.y())
+        });
+
+        let end_turn = global.doc.get_element_by_id("end_turn").unwrap();
+        let on_end_turn = set_event_cb(&end_turn, "click", move |e: PointerEvent| {
+            e.prevent_default();
+            STATE.lock().unwrap().on_end_turn()
         });
         
         console_log!("sending join message");
@@ -193,7 +208,8 @@ impl Playing {
             global,
             board,
             room_name: String::new(),
-            is_turn: false,
+            is_turn: true,
+            pieces_placed: 0,
             players: Vec::new(),
             hand: Vec::new(),
             selected_piece: None,
@@ -201,6 +217,8 @@ impl Playing {
             chat_div,
             players_div,
             on_board_click,
+            on_board_move,
+            on_end_turn,
         })
     }
 
@@ -224,22 +242,36 @@ impl Playing {
     fn on_board_click(&mut self, x: i32, y: i32) -> JsResult<()> {
         console_log!("Board Click: ({}, {})", x, y);
 
+        if !self.is_turn {
+            console_log!("not your turn");
+            return Ok(());
+        }
+
         // The player has clicked and wants to place a piece:
         if let Some(piece) = self.selected_piece {
-            console_log!("placed piece: {:?}", piece);
-
-            let in_hand = self.board.world_insert(x, y, piece);
-            if in_hand {
-                self.hand.push(piece);
+            console_log!("placing piece: {:?}", piece);
+            
+            if self.board.world_contains(x, y) {
+                // User is trying to place on another tile, don't let them
+                console_log!("piece already there");
+            } else {
+                let in_hand = self.board.world_insert(x, y, piece);
+    
+                if in_hand {
+                    self.hand.push(piece);
+                    self.pieces_placed -= 1;
+                } else {
+                    self.pieces_placed += 1;
+                }
+    
+                self.selected_piece = None;
             }
-
-            self.selected_piece = None;
         } else {
             if let Some((piece, in_hand)) = self.board.remove_piece_at(x, y) {
-                console_log!("picked up: {:?}", piece);
+                console_log!("picked up: {:?}, in hand: {}", piece, in_hand);
 
                 if in_hand {
-                    self.hand.swap_remove(self.hand.iter().position(|x| *x == piece).expect("piece not in hand"));
+                    self.hand.remove(self.hand.iter().position(|x| *x == piece).expect("piece not in hand"));
                 }
 
                 self.selected_piece = Some(piece);
@@ -249,6 +281,23 @@ impl Playing {
         }
 
         self.board.rerender();
+        console_log!("hand: {:?}", self.hand);
+
+        Ok(())
+    }
+
+    fn on_board_move(&mut self, x: i32, y: i32) -> JsResult<()> {
+        if let Some(piece) = self.selected_piece {
+            if !self.board.world_contains(x, y) {
+                self.board.world_render_highlight(x, y, &piece);
+            }
+        }
+        
+        Ok(())
+    }
+
+    fn on_end_turn(&mut self) -> JsResult<()> {
+        console_log!("on_end_turn");
 
         Ok(())
     }
@@ -286,17 +335,10 @@ impl State {
             send_ping(),
             on_joined_room(room_name: String, players: Vec<String>, hand: Vec<Piece>),
             on_board_click(x: i32, y: i32),
+            on_board_move(x: i32, y: i32),
+            on_end_turn(),
         ]
     );
-
-    // pub fn send_ping(&self) {
-    //     // match self {
-    //     //     Connecting(c) => {
-
-    //     //     },
-    //     //     CreateOrJoin(c) =>
-    //     // }
-    // }
 }
 
 unsafe impl Send for State {}

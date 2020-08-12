@@ -17,6 +17,7 @@ pub struct Board {
     renderer: SVGRenderer,
     cell_width: i32,
     cell_height: i32,
+    last_highlight: Option<(i32, i32)>,
 }
 
 impl Board {
@@ -36,6 +37,7 @@ impl Board {
             renderer,
             cell_width: width / COLS,
             cell_height: height / ROWS,
+            last_highlight: None,
         }
     }
 
@@ -51,8 +53,6 @@ impl Board {
         let grid_x_1 = 0;
         let grid_y_1 = (ROWS - 5) * self.cell_height;
         let grid_x_2 = COLS * self.cell_width;
-        let grid_y_2 = grid_y_1;
-
         let line = SVGElem::new(Tag::Line)
             .set(Attr::X1, 0)
             .set(Attr::Y1, -5)
@@ -89,7 +89,7 @@ impl Board {
     }
 
     pub fn in_hand(&self, grid_x: i32, grid_y: i32) -> bool {
-        grid_x > 0 && grid_y > ROWS - 5
+        grid_x > 0 && grid_y >= ROWS - 5
     }
 
     pub fn world_in_hand(&self, world_x: i32, world_y: i32) -> bool {
@@ -99,17 +99,51 @@ impl Board {
         self.in_hand(grid_x, grid_y)
     }
 
+    pub fn world_contains(&self, world_x: i32, world_y: i32) -> bool {
+        let grid_x = world_x / self.cell_width;
+        let grid_y = world_y / self.cell_height;
+
+        self.grid.contains_key(&(grid_x, grid_y))    
+    }
+
+    pub fn world_render_highlight(&mut self, world_x: i32, world_y: i32, piece: &Piece) {
+        let grid_x = world_x / self.cell_width;
+        let grid_y = world_y / self.cell_height;
+
+        if self.last_highlight != Some((grid_x, grid_y)) {
+            let background = SVGElem::new(Tag::Rect)
+                .set(Attr::Fill, "lightgrey")
+                .set(Attr::Width, self.cell_width)
+                .set(Attr::Height, self.cell_height)
+                .set(Attr::X, 0)
+                .set(Attr::Y, 0);
+
+            let num = SVGElem::new(Tag::Text)
+                .set(Attr::Fill, piece.color)
+                .set(Attr::Transform, "scale(1, 2)")
+                .set(Attr::X, self.cell_width / 2)
+                .set(Attr::Y, self.cell_height / 4)
+                .set(Attr::DominantBaseline, "central")
+                .set(Attr::TextAnchor, "middle")
+                .set(Attr::Class, "piece_text")
+                .set(Attr::TextLength, self.cell_width - 5)
+                .set(Attr::LengthAdjust, "spacingAndGlyphs")
+                .set_inner(&piece.num.to_string());
+
+            let piece = SVGElem::new(Tag::G).append(background).append(num);
+            
+            self.rerender();
+            self.renderer.render(piece, ((grid_x * self.cell_width) as f32, (grid_y * self.cell_height) as f32));
+
+            self.last_highlight = Some((grid_x, grid_y));
+        }
+    }
+
     pub fn remove_piece_at(&mut self, world_x: i32, world_y: i32) -> Option<(Piece, bool)> {
-        crate::console_log!("pieces: {:?}", self.grid);
-
-        crate::console_log!("world: ({} {})", world_x, world_y);
-
         let grid_x = world_x / self.cell_width;
         let grid_y = world_y / self.cell_height;
         
-        crate::console_log!("grid: ({}, {})", grid_x, grid_y);
-        
-        let in_hand = grid_y > ROWS - 5;
+        let in_hand = grid_y >= ROWS - 5;
 
         self.grid.remove(&(grid_x, grid_y)).map(|p| (p, in_hand))
     }
@@ -120,7 +154,7 @@ impl Board {
 
         self.grid.insert((grid_x, grid_y), piece);
 
-        grid_y > ROWS - 5
+        grid_y >= ROWS - 5
     }
 
     pub fn insert_as_hand(&mut self, pieces: &[Piece]) {
