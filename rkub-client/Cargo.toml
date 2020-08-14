@@ -49,6 +49,7 @@ features = [
   'console',
   'Document',
   'DomTokenList',
+  'DomRect',
   'Element',
   'EventTarget',
   'FileReader',

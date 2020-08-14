@@ -66,8 +66,13 @@ impl CreateOrJoin {
         set_event_cb(&button, "click", |e: MouseEvent| {
             console_log!("join_button clicked");
 
-            {
-                STATE.lock().unwrap().on_join_start().unwrap();
+            let room_input = global.doc.get_element_by_id("room_input").unwrap();
+            let room_name = room_input.inner_html().to_string();
+
+            if room_name.is_empty() {
+                global.window.alert_with_message("To join a room, make sure you enter the room id.");
+            } else {
+                STATE.lock().unwrap().on_join_start(room_name)?;
             }
 
             Ok(())
@@ -77,11 +82,18 @@ impl CreateOrJoin {
         Ok(CreateOrJoin { global })
     }
 
-    pub fn on_join_start(self) -> JsResult<Connecting> {
+    pub fn on_join_start(self, room_name: String) -> JsResult<Connecting> {
         let html = self.global.doc.get_element_by_id("create_or_join").unwrap();
         html.toggle_attribute("hidden")?;
 
-        Connecting::new(self.global)
+        Connecting::new(self.global, Some(room_name))
+    }
+
+    pub fn on_create_start(self) -> JsResult<Connecting> {
+        let html = self.global.doc.get_element_by_id("create_or_join").unwrap();
+        html.toggle_attribute("hidden")?;
+
+        Connecting::new(self.global, None)    
     }
 
 }
@@ -90,10 +102,11 @@ impl CreateOrJoin {
 pub struct Connecting {
     pub global: Global,
     pub ws: WebSocket,
+    pub room_name: Option<String>,
 }
 
 impl Connecting {
-    pub fn new(global: Global) -> JsResult<Self> {
+    pub fn new(global: Global, room_name: Option<String>) -> JsResult<Self> {
         let html = global.doc.get_element_by_id("connecting").unwrap();
         html.toggle_attribute("hidden")?;
 
@@ -113,7 +126,7 @@ impl Connecting {
         })
         .forget();
 
-        Ok(Connecting { global, ws })
+        Ok(Connecting { global, ws, room_name })
     }
 
     pub fn on_connected(self) -> JsResult<Playing> {
@@ -211,7 +224,7 @@ impl Playing {
         let join_message = serde_json::to_string(&ClientMessage::CreateRoom("fisher".to_string())).unwrap();
         ws.send_with_str(&join_message)?;
 
-        Ok(Self {
+        let mut this = Self {
             ws,
             global,
             board,
@@ -228,12 +241,17 @@ impl Playing {
             on_board_move,
             on_end_turn,
             on_window_resize,
-        })
+        };  
+
+        Ok(this)
     }
 
     fn on_joined_room(&mut self, room_name: String, players: Vec<String>, mut hand: Vec<Piece>) -> JsResult<()> {
         hand.sort();
         
+        self.global.doc.get_element_by_id("room").unwrap().set_inner_html(&format!("Room: {}", room_name));
+
+
         self.board.insert_as_hand(&hand);
 
         self.room_name = room_name;
@@ -241,14 +259,29 @@ impl Playing {
         self.hand = hand;
         
         self.board.rerender();
-        // for piece in
-
+        self.update_players();
+        
         console_log!("[{}] {:?} pieces, {:?}", self.room_name, self.hand.len(), self.players);
 
         Ok(())
     }
 
+    fn update_players(&mut self) {
+        let mut inner_html = String::new();
+
+        for player in &self.players {
+            inner_html.push_str(&format!("<tr>{}</tr>", player));
+        }
+
+        inner_html = format!("<table>{}</table>", inner_html);
+        self.players_div.set_inner_html(&inner_html);
+    }
+
     fn on_board_click(&mut self, x: i32, y: i32) -> JsResult<()> {
+        let rect = self.board_div.get_bounding_client_rect();
+        let x = x - rect.x() as i32;
+        let y = y - rect.y() as i32;
+        
         console_log!("Board Click: ({}, {})", x, y);
 
         if !self.is_turn {
@@ -297,6 +330,10 @@ impl Playing {
     }
 
     fn on_board_move(&mut self, x: i32, y: i32) -> JsResult<()> {
+        let rect = self.board_div.get_bounding_client_rect();
+        let x = x - rect.x() as i32;
+        let y = y - rect.y() as i32;
+        
         if let Some(piece) = self.selected_piece {
             if !self.board.world_contains(x, y) {
                 self.board.world_render_highlight(x, y, &piece);
@@ -321,7 +358,7 @@ impl Playing {
 
         // TODO: Method for describing what the player added to their hand!
         let played_grid = self.board.played_grid();
-        self.send_message(ClientMessage::PlayedPieces(played_grid))
+        self.send_message(ClientMessage::PlayedPieces(played_grid, self.hand.clone()))
     }
 
     fn on_turn_finished(&mut self, ending_player: String, ending_drew: bool, next_player: String, pieces_remaining: usize, played_pieces: BTreeMap<(i32, i32), Piece>) -> JsResult<()> {
@@ -332,6 +369,13 @@ impl Playing {
         console_log!("{} played these pieces: {:?}", ending_player, played_pieces);
 
         Ok(())    
+    }
+
+    pub fn on_player_joined(&mut self, name: String) -> JsResult<()> {
+        self.players.push(name);
+        self.update_players();
+
+        Ok(())
     }
 
     pub fn on_window_resize(&mut self) -> JsResult<()> {
@@ -366,7 +410,8 @@ pub enum State {
 impl State {
     transitions!(
         CreateOrJoin => [
-            on_join_start() -> Connecting,
+            on_join_start(room: Option<String>) -> Connecting,
+            on_create_start() -> Conneting,
         ],
         Connecting => [
             on_connected() -> Playing,
@@ -380,6 +425,7 @@ impl State {
             on_board_click(x: i32, y: i32),
             on_board_move(x: i32, y: i32),
             on_turn_finished(ending_player: String, ending_drew: bool, next_player: String, pieces_remaining: usize, played_pieces: BTreeMap<(i32, i32), Piece>),
+            on_player_joined(name: String),
             on_end_turn(),
             on_window_resize(),
         ]

@@ -80,9 +80,12 @@ fn on_message(msg: ServerMessage) -> JsResult<()> {
         }
         ServerMessage::TurnFinished {
             ending_player, ending_drew, next_player,
-            pieces_remaining, played_pieces
+            pieces_remaining, board
         } => {
-            crate::STATE.lock().unwrap().on_turn_finished(ending_player, ending_drew, next_player, pieces_remaining, played_pieces)
+            crate::STATE.lock().unwrap().on_turn_finished(ending_player, ending_drew, next_player, pieces_remaining, board)
+        }
+        ServerMessage::PlayerJoined(name) => {
+            crate::STATE.lock().unwrap().on_player_joined(name)
         }
         ServerMessage::Pong => {
             console_log!("Server: Pong");

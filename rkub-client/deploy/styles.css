@@ -17,6 +17,24 @@ body, html {
     flex-flow: row wrap;
 }
 
+div#create_or_join {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+}
+
+div#join {
+    display: flex;
+    /* align-self: flex-start; */
+    /* height: calc(50%); */
+}
+
+button#create {
+    /* align-self: flex-end; */
+    /* height: calc(50%); */
+}
+
 div#extra {
     flex-grow: 1;
     display: flex;
@@ -52,6 +70,29 @@ div#chat {
     /* display: flex; */
     flex-grow: 7;
 }
+
+div#info_bar {
+    width: 100vw;
+    display: flex;
+}
+
+div#room {
+    flex-grow: 1;
+}
+
+div#current_player {
+    flex-grow: 1;
+}
+
+div#last_player {
+    flex-grow: 1;
+}
+
+div#pieces_remaining {
+    flex-grow: 1;
+}
+
+
 
 .piece_text {
     font-family: 'Roboto Mono', monospace;
