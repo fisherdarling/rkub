@@ -74,14 +74,23 @@ fn timestamp() -> String {
 
 fn on_message(msg: ServerMessage) -> JsResult<()> {
     match msg {
+        ServerMessage::Pong => {
+            console_log!("Server: Pong");
+            Ok(())
+        }
         ServerMessage::JoinedRoom {
             room_name,
             players,
             hand,
-        } => crate::STATE
-            .lock()
-            .unwrap()
-            .on_joined_room(room_name, players, hand),
+            pieces_remaining,
+            board,
+        } => crate::STATE.lock().unwrap().on_joined_room(
+            room_name,
+            players,
+            hand,
+            pieces_remaining,
+            board,
+        ),
         ServerMessage::TurnFinished {
             ending_player,
             ending_drew,
@@ -95,20 +104,23 @@ fn on_message(msg: ServerMessage) -> JsResult<()> {
             pieces_remaining,
             board,
         ),
+        ServerMessage::PlayerWon(name) => crate::STATE.lock().unwrap().on_player_won(name),
+        ServerMessage::CurrentPlayer(idx) => crate::STATE.lock().unwrap().on_current_player(idx),
         ServerMessage::PlayerJoined(name) => crate::STATE.lock().unwrap().on_player_joined(name),
-        ServerMessage::Pong => {
-            console_log!("Server: Pong");
-            Ok(())
-        }
         ServerMessage::DrawPiece(piece) => crate::STATE.lock().unwrap().on_draw_piece(piece),
         ServerMessage::Place(coord, piece) => {
             crate::STATE.lock().unwrap().on_piece_place(coord, piece)
         }
-
         ServerMessage::Pickup(coord, piece) => crate::STATE.lock().unwrap().on_pickup(coord, piece),
         ServerMessage::InvalidBoardState => crate::STATE.lock().unwrap().on_invalid_board(),
         ServerMessage::StartTurn => crate::STATE.lock().unwrap().on_turn_start(),
         ServerMessage::EndTurnValid => crate::STATE.lock().unwrap().on_end_turn_valid(),
+        ServerMessage::PlayerDisconnected(idx) => {
+            crate::STATE.lock().unwrap().on_player_disconnected(idx)
+        }
+        ServerMessage::PlayerReconnected(idx) => {
+            crate::STATE.lock().unwrap().on_player_reconnected(idx)
+        }
         _ => {
             console_log!("unhandled message: {:?}", msg);
             Ok(())

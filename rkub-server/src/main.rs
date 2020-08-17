@@ -72,9 +72,34 @@ impl Room {
                 }
             }
             ClientMessage::Close => {
-                info!("[{}] closed", addr);
-                // let idx = self.connections.remove(&addr).unwrap();
-                // self.players.remove(idx);
+                let idx = self.connections[&addr];
+                self.players[idx].connected = false;
+                info!("[{}] {} closed", addr, self.players[idx].name);
+
+                let _ = self.broadcast(ServerMessage::PlayerDisconnected(idx)).await;
+
+                if self.players.iter().all(|p| !p.connected) {
+                    return false;
+                }
+
+                if self.active_player == idx {
+                    while !self.players[self.active_player].connected {
+                        self.active_player = (self.active_player + 1) % self.players.len();
+                    }
+
+                    let next_player = &mut self.players[self.active_player];
+                    next_player.send_msg(ServerMessage::StartTurn).await;
+
+                    let msg = ServerMessage::TurnFinished {
+                        ending_player: self.players[idx].name.clone(),
+                        ending_drew: false,
+                        next_player: self.active_player,
+                        pieces_remaining: self.game.remaining_pieces().len(),
+                        board: self.game.board().clone(),
+                    };
+
+                    let _ = self.broadcast(msg).await;
+                }
             }
             ClientMessage::EndTurn => {
                 if self.connections[&addr] != self.active_player {
@@ -93,7 +118,6 @@ impl Room {
                     self.players[self.connections[&addr]].send_msg(msg).await;
                     return true;
                 }
-
                 info!(
                     "[{}] {} valid turn: delta: {}",
                     addr, self.players[self.connections[&addr]].name, self.active_delta
@@ -107,6 +131,20 @@ impl Room {
                     } else {
                         drew = false;
                     }
+                }
+
+                if !drew && self.players[self.connections[&addr]].hand.is_empty() {
+                    info!(
+                        "[{}] {} won the game!",
+                        addr, self.players[self.connections[&addr]].name
+                    );
+
+                    let _ = self
+                        .broadcast(ServerMessage::PlayerWon(
+                            self.players[self.connections[&addr]].name.clone(),
+                        ))
+                        .await;
+                    return false;
                 }
 
                 let msg = ServerMessage::EndTurnValid;
@@ -123,14 +161,18 @@ impl Room {
 
                 let ending_player = self.players[self.connections[&addr]].name.clone();
                 self.active_player = (self.active_player + 1) % self.players.len();
-                let next_player = &mut self.players[self.active_player];
 
+                while !self.players[self.active_player].connected {
+                    self.active_player = (self.active_player + 1) % self.players.len();
+                }
+
+                let next_player = &mut self.players[self.active_player];
                 next_player.send_msg(ServerMessage::StartTurn).await;
 
                 let msg = ServerMessage::TurnFinished {
                     ending_player,
                     ending_drew: drew,
-                    next_player: next_player.name.clone(),
+                    next_player: self.active_player,
                     pieces_remaining: self.game.remaining_pieces().len(),
                     board: self.game.board().clone(),
                 };
@@ -198,6 +240,43 @@ impl Room {
                 .await?;
         }
 
+        if let Some((idx, _)) = self
+            .players
+            .iter()
+            .enumerate()
+            .find(|(_, p)| p.name == name && !p.connected)
+        {
+            self.connections.insert(addr, idx);
+        }
+
+        if self.connections.contains_key(&addr) {
+            info!("[{}] {} reconnected!", addr, name);
+            self.players[self.connections[&addr]].connected = true;
+            let hand = self.players[self.connections[&addr]].hand.clone();
+
+            let pieces_remaining = self.game.remaining_pieces().len();
+            ws_sender
+                .send(ServerMessage::JoinedRoom {
+                    room_name: self.name.clone(),
+                    players: self.players.iter().map(|p| p.name.clone()).collect(),
+                    hand: hand.clone(),
+                    pieces_remaining,
+                    board: self.game.board().clone(),
+                })
+                .await?;
+
+            ws_sender
+                .send(ServerMessage::CurrentPlayer(self.active_player))
+                .await?;
+
+            self.players[self.connections[&addr]].sender = ws_sender;
+            let _ = self
+                .broadcast(ServerMessage::PlayerReconnected(self.connections[&addr]))
+                .await;
+
+            return Ok(());
+        }
+
         // let hand = self.game.deal(14);
 
         let hand = self.game.deal(28);
@@ -208,11 +287,14 @@ impl Room {
 
         self.players.push(player);
 
+        let pieces_remaining = self.game.remaining_pieces().len();
         ws_sender
             .send(ServerMessage::JoinedRoom {
                 room_name: self.name.clone(),
                 players: self.players.iter().map(|p| p.name.clone()).collect(),
                 hand,
+                pieces_remaining,
+                board: self.game.board().clone(),
             })
             .await?;
 
@@ -223,7 +305,9 @@ impl Room {
 
     pub async fn broadcast(&self, msg: ServerMessage) -> anyhow::Result<()> {
         for idx in self.connections.values() {
-            self.players[*idx].sender.send(msg.clone()).await?;
+            if self.players[*idx].connected {
+                self.players[*idx].sender.send(msg.clone()).await?;
+            }
         }
 
         Ok(())
@@ -234,13 +318,19 @@ type Rooms = Lock<HashMap<String, RoomHandle>>;
 
 pub struct Player {
     name: String,
+    connected: bool,
     hand: Vec<Piece>,
     sender: Sender<ServerMessage>,
 }
 
 impl Player {
     pub fn new(name: String, hand: Vec<Piece>, sender: Sender<ServerMessage>) -> Self {
-        Self { name, hand, sender }
+        Self {
+            name,
+            connected: true,
+            hand,
+            sender,
+        }
     }
 
     pub async fn send_msg(&mut self, msg: ServerMessage) {
@@ -348,6 +438,8 @@ async fn handle_connection(
                     run_room(handle.clone(), recv),
                     run_player(addr, name, ws, handle)
                 );
+
+                info!("finished running room: {}", new_id);
 
                 return Ok(());
 

@@ -59,6 +59,10 @@ impl Board {
         &self.grid
     }
 
+    pub fn grid_mut(&mut self) -> &mut BTreeMap<Coord, Piece> {
+        &mut self.grid
+    }
+
     pub fn played_grid(&self) -> BTreeMap<Coord, Piece> {
         self.grid
             .iter()

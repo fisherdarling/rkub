@@ -107,3 +107,19 @@ body, html {
     stroke: black;
     user-select: none;
 }
+
+.active_player::before {
+    content: "➤ ";
+}
+
+.active_player {
+    color: green;
+}
+
+.disconnected {
+    color: red;
+}
+
+.disconnected::before {
+    content: "❌ ";
+}

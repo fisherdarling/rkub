@@ -204,8 +204,9 @@ pub struct Playing {
     pub board: Board,
     pub room_name: String,
     pub is_turn: bool,
-    // pub played_pieces: BTreeMap<Coord, Piece>,
+    pub active_player: usize,
     pub players: Vec<String>,
+    pub disconnected: Vec<usize>,
     pub hand: Vec<Piece>,
     pub selected_piece: Option<Piece>,
     pub board_div: Element,
@@ -300,14 +301,15 @@ impl Playing {
 
         console_log!("is turn: {}", is_turn);
 
-        let this = Self {
+        let mut this = Self {
             ws,
             global,
             board,
             room_name: String::new(),
             is_turn,
-            // played_pieces: BTreeMap::new(),
+            active_player: 0,
             players: Vec::new(),
+            disconnected: Vec::new(),
             hand: Vec::new(),
             selected_piece: None,
             board_div,
@@ -318,6 +320,8 @@ impl Playing {
             on_window_resize,
         };
 
+        this.update_players();
+
         Ok(this)
     }
 
@@ -326,6 +330,8 @@ impl Playing {
         room_name: String,
         players: Vec<String>,
         mut hand: Vec<Piece>,
+        pieces_remaining: usize,
+        board: BTreeMap<Coord, Piece>,
     ) -> JsResult<()> {
         hand.sort();
 
@@ -335,6 +341,13 @@ impl Playing {
             .unwrap()
             .set_inner_html(&room_name);
 
+        self.global
+            .doc
+            .get_element_by_id("pieces_remaining")
+            .unwrap()
+            .set_inner_html(&format!("{}", pieces_remaining));
+
+        *self.board.grid_mut() = board;
         self.board.insert_as_hand(&hand);
 
         self.room_name = room_name;
@@ -342,6 +355,7 @@ impl Playing {
         self.hand = hand;
 
         self.board.rerender();
+
         self.update_players();
 
         console_log!(
@@ -357,8 +371,20 @@ impl Playing {
     fn update_players(&mut self) {
         let mut inner_html = String::new();
 
-        for player in &self.players {
-            inner_html.push_str(&format!("<tr><td>{}</td></tr>", player));
+        for (i, player) in self.players.iter().enumerate() {
+            if i == self.active_player {
+                inner_html.push_str(&format!(
+                    "<tr><td class=\"active_player\">{}</td></tr>",
+                    player
+                ));
+            } else if self.disconnected.contains(&i) {
+                inner_html.push_str(&format!(
+                    "<tr><td class=\"disconnected\">{}</td></tr>",
+                    player
+                ));
+            } else {
+                inner_html.push_str(&format!("<tr><td>{}</td></tr>", player));
+            }
         }
 
         inner_html = format!("<table>{}</table>", inner_html);
@@ -513,21 +539,23 @@ impl Playing {
         &mut self,
         ending_player: String,
         ending_drew: bool,
-        next_player: String,
+        next_player: usize,
         pieces_remaining: usize,
         board: BTreeMap<Coord, Piece>,
     ) -> JsResult<()> {
         console_log!("Turn Finished for {}", ending_player);
         console_log!("{} drew? {}", ending_player, ending_drew);
-        console_log!("{} is the next player", next_player);
+        console_log!("{} is the next player", self.players[next_player]);
         console_log!("There are {} pieces remaining", pieces_remaining);
         console_log!("board: {:?}", board);
+
+        self.active_player = next_player;
 
         self.global
             .doc
             .get_element_by_id("current_player")
             .unwrap()
-            .set_inner_html(&format!("{}", next_player));
+            .set_inner_html(&format!("{}", self.players[next_player]));
 
         self.global
             .doc
@@ -540,6 +568,9 @@ impl Playing {
             .get_element_by_id("pieces_remaining")
             .unwrap()
             .set_inner_html(&format!("{}", pieces_remaining));
+
+        self.update_players();
+        self.rerender();
 
         Ok(())
     }
@@ -563,9 +594,52 @@ impl Playing {
         Ok(())
     }
 
-    // pub fn on_game_won(&mut self, winner: String) -> JsResult<()> {
-    //     // self
-    // }
+    pub fn on_player_disconnected(&mut self, idx: usize) -> JsResult<()> {
+        console_log!("on_player_disconnected");
+        self.disconnected.push(idx);
+
+        self.update_players();
+
+        Ok(())
+    }
+
+    pub fn on_current_player(&mut self, idx: usize) -> JsResult<()> {
+        self.global
+            .doc
+            .get_element_by_id("current_player")
+            .unwrap()
+            .set_inner_html(&format!("{}", self.players[idx]));
+
+        self.global
+            .doc
+            .get_element_by_id("last_player")
+            .unwrap()
+            .set_inner_html("N/A");
+
+        self.active_player = idx;
+        self.update_players();
+
+        Ok(())
+    }
+
+    pub fn on_player_reconnected(&mut self, idx: usize) -> JsResult<()> {
+        for i in 0..self.disconnected.len() {
+            if self.disconnected[i] == idx {
+                self.disconnected.swap_remove(i);
+                break;
+            }
+        }
+
+        self.update_players();
+
+        Ok(())
+    }
+
+    pub fn on_player_won(&mut self, name: String) -> JsResult<()> {
+        self.global
+            .window
+            .alert_with_message(&format!("{} won the game! Refresh to play again!", name))
+    }
 
     pub fn on_window_resize(&mut self) -> JsResult<()> {
         console_log!("resize");
@@ -610,16 +684,19 @@ impl State {
     methods!(
         Playing => [
             send_ping(),
-            on_joined_room(room_name: String, players: Vec<String>, hand: Vec<Piece>),
+            on_joined_room(room_name: String, players: Vec<String>, hand: Vec<Piece>, pieces_left: usize, board: BTreeMap<Coord, Piece>),
             on_board_click(x: i32, y: i32),
             on_board_move(x: i32, y: i32),
             on_turn_start(),
-            on_turn_finished(ending_player: String, ending_drew: bool, next_player: String, pieces_remaining: usize, board: BTreeMap<Coord, Piece>),
+            on_turn_finished(ending_player: String, ending_drew: bool, next_player: usize, pieces_remaining: usize, board: BTreeMap<Coord, Piece>),
             on_player_joined(name: String),
             on_draw_piece(piece: Piece),
             on_piece_place(coord: Coord, piece: Piece),
             on_pickup(coord: Coord, piece: Piece),
-            // on_game_won(winner: String),
+            on_player_disconnected(idx: usize),
+            on_player_reconnected(idx: usize),
+            on_current_player(idx: usize),
+            on_player_won(name: String),
             on_invalid_board(),
             on_end_turn(),
             on_end_turn_valid(),
