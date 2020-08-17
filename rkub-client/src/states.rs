@@ -1,11 +1,15 @@
 use std::collections::BTreeMap;
 use wasm_bindgen::prelude::*;
-use web_sys::{Document, Element, MessageEvent, MouseEvent, WebSocket, Window, Event, PointerEvent};
+use wasm_bindgen::JsCast;
+use web_sys::{
+    Document, Element, Event, HtmlInputElement, MessageEvent, MouseEvent, PointerEvent, WebSocket,
+    Window,
+};
 
-use crate::STATE;
 use crate::board::Board;
-use crate::{console_log, log, set_event_cb, timestamp};
-use rkub_common::{ClientMessage, Color, Piece, ServerMessage, Game};
+use crate::STATE;
+use crate::{console_log, set_event_cb};
+use rkub_common::{ClientMessage, Coord, Game, Piece, ServerMessage};
 
 type JsResult<T> = Result<T, JsValue>;
 type JsError = Result<(), JsValue>;
@@ -53,6 +57,8 @@ pub struct Global {
 #[derive(Debug)]
 pub struct CreateOrJoin {
     global: Global,
+    join_cb: JsClosure<MouseEvent>,
+    create_cb: JsClosure<MouseEvent>,
 }
 
 impl CreateOrJoin {
@@ -62,51 +68,100 @@ impl CreateOrJoin {
         let html = doc.get_element_by_id("create_or_join").unwrap();
         html.toggle_attribute("hidden")?;
 
-        let button = doc.get_element_by_id("join_button").unwrap();
-        set_event_cb(&button, "click", |e: MouseEvent| {
+        let join_button = doc.get_element_by_id("join_room").unwrap();
+        let join_cb = set_event_cb(&join_button, "click", |_e: MouseEvent| {
             console_log!("join_button clicked");
 
-            let room_input = global.doc.get_element_by_id("room_input").unwrap();
-            let room_name = room_input.inner_html().to_string();
+            let window = web_sys::window().unwrap();
+            let room_input: HtmlInputElement = window
+                .document()
+                .unwrap()
+                .get_element_by_id("input_room")
+                .unwrap()
+                .dyn_into()?;
+
+            let name_input: HtmlInputElement = window
+                .document()
+                .unwrap()
+                .get_element_by_id("input_name")
+                .unwrap()
+                .dyn_into()?;
+
+            let room_name = room_input.value();
+            let player_name = name_input.value();
 
             if room_name.is_empty() {
-                global.window.alert_with_message("To join a room, make sure you enter the room id.");
+                window.alert_with_message("Please enter a valid room ID")?;
             } else {
-                STATE.lock().unwrap().on_join_start(room_name)?;
+                if player_name.is_empty() {
+                    window.alert_with_message("Please enter name")?;
+                } else {
+                    STATE
+                        .lock()
+                        .unwrap()
+                        .on_join_start(player_name, room_name)?;
+                }
             }
 
             Ok(())
+        });
+
+        let create_button = doc.get_element_by_id("create_room").unwrap();
+        let create_cb = set_event_cb(&create_button, "click", |_e: MouseEvent| {
+            console_log!("create_button clicked");
+
+            let window = web_sys::window().unwrap();
+
+            let name_input: HtmlInputElement = window
+                .document()
+                .unwrap()
+                .get_element_by_id("input_name")
+                .unwrap()
+                .dyn_into()?;
+
+            let player_name = name_input.value();
+            if player_name.is_empty() {
+                window.alert_with_message("please enter a name")?;
+            } else {
+                STATE.lock().unwrap().on_create_start(player_name)?;
+            }
+
+            Ok(())
+        });
+
+        Ok(CreateOrJoin {
+            global,
+            join_cb,
+            create_cb,
         })
-        .forget();
-
-        Ok(CreateOrJoin { global })
     }
 
-    pub fn on_join_start(self, room_name: String) -> JsResult<Connecting> {
+    pub fn on_join_start(self, player_name: String, room_name: String) -> JsResult<Connecting> {
         let html = self.global.doc.get_element_by_id("create_or_join").unwrap();
-        html.toggle_attribute("hidden")?;
+        html.set_attribute("style", "display:none")?;
+        // html.
 
-        Connecting::new(self.global, Some(room_name))
+        Connecting::new(self.global, player_name, Some(room_name))
     }
 
-    pub fn on_create_start(self) -> JsResult<Connecting> {
+    pub fn on_create_start(self, player_name: String) -> JsResult<Connecting> {
         let html = self.global.doc.get_element_by_id("create_or_join").unwrap();
-        html.toggle_attribute("hidden")?;
+        html.set_attribute("style", "display:none")?;
 
-        Connecting::new(self.global, None)    
+        Connecting::new(self.global, player_name, None)
     }
-
 }
 
 #[derive(Debug)]
 pub struct Connecting {
     pub global: Global,
     pub ws: WebSocket,
+    pub player_name: String,
     pub room_name: Option<String>,
 }
 
 impl Connecting {
-    pub fn new(global: Global, room_name: Option<String>) -> JsResult<Self> {
+    pub fn new(global: Global, player_name: String, room_name: Option<String>) -> JsResult<Self> {
         let html = global.doc.get_element_by_id("connecting").unwrap();
         html.toggle_attribute("hidden")?;
 
@@ -126,14 +181,19 @@ impl Connecting {
         })
         .forget();
 
-        Ok(Connecting { global, ws, room_name })
+        Ok(Connecting {
+            global,
+            ws,
+            player_name,
+            room_name,
+        })
     }
 
     pub fn on_connected(self) -> JsResult<Playing> {
         let html = self.global.doc.get_element_by_id("connecting").unwrap();
         html.toggle_attribute("hidden")?;
 
-        Playing::new(self.global, self.ws)
+        Playing::new(self.global, self.ws, self.player_name)
     }
 }
 
@@ -144,25 +204,24 @@ pub struct Playing {
     pub board: Board,
     pub room_name: String,
     pub is_turn: bool,
-    // pub played_pieces: BTreeMap<(i32, i32), Piece>,
+    // pub played_pieces: BTreeMap<Coord, Piece>,
     pub players: Vec<String>,
     pub hand: Vec<Piece>,
     pub selected_piece: Option<Piece>,
     pub board_div: Element,
-    pub chat_div: Element,
     pub players_div: Element,
     pub on_board_click: JsClosure<PointerEvent>,
     pub on_board_move: JsClosure<PointerEvent>,
     pub on_end_turn: JsClosure<PointerEvent>,
-    pub on_window_resize: JsClosure<Event>
+    pub on_window_resize: JsClosure<Event>,
 }
 
 impl Playing {
-    pub fn new(global: Global, ws: WebSocket) -> JsResult<Self> {
+    pub fn new(global: Global, ws: WebSocket, player_name: String) -> JsResult<Self> {
         // Display the game board:
         let html = global.doc.get_element_by_id("playing").unwrap();
         html.toggle_attribute("hidden")?;
-        
+
         // We have connected so setup the websocket heartbeat:
         // crate::create_heartbeat()?;
 
@@ -189,11 +248,10 @@ impl Playing {
         .forget();
 
         let board = Board::new();
-        
+
         let board_div = global.doc.get_element_by_id("board").unwrap();
-        let chat_div = global.doc.get_element_by_id("chat").unwrap();
         let players_div = global.doc.get_element_by_id("players").unwrap();
-        
+
         console_log!("Board Div Child: {:?}", board_div.first_child());
 
         let svg = board_div.get_elements_by_tag_name("svg").item(0).unwrap();
@@ -218,13 +276,13 @@ impl Playing {
             e.prevent_default();
             STATE.lock().unwrap().on_window_resize()
         });
-        
+
         console_log!("sending join message");
 
-        let join_message = serde_json::to_string(&ClientMessage::CreateRoom("fisher".to_string())).unwrap();
+        let join_message = serde_json::to_string(&ClientMessage::CreateRoom(player_name)).unwrap();
         ws.send_with_str(&join_message)?;
 
-        let mut this = Self {
+        let this = Self {
             ws,
             global,
             board,
@@ -235,33 +293,45 @@ impl Playing {
             hand: Vec::new(),
             selected_piece: None,
             board_div,
-            chat_div,
             players_div,
             on_board_click,
             on_board_move,
             on_end_turn,
             on_window_resize,
-        };  
+        };
 
         Ok(this)
     }
 
-    fn on_joined_room(&mut self, room_name: String, players: Vec<String>, mut hand: Vec<Piece>) -> JsResult<()> {
+    fn on_joined_room(
+        &mut self,
+        room_name: String,
+        players: Vec<String>,
+        mut hand: Vec<Piece>,
+    ) -> JsResult<()> {
         hand.sort();
-        
-        self.global.doc.get_element_by_id("room").unwrap().set_inner_html(&format!("Room: {}", room_name));
 
+        self.global
+            .doc
+            .get_element_by_id("room")
+            .unwrap()
+            .set_inner_html(&room_name);
 
         self.board.insert_as_hand(&hand);
 
         self.room_name = room_name;
         self.players = players;
         self.hand = hand;
-        
+
         self.board.rerender();
         self.update_players();
-        
-        console_log!("[{}] {:?} pieces, {:?}", self.room_name, self.hand.len(), self.players);
+
+        console_log!(
+            "[{}] {:?} pieces, {:?}",
+            self.room_name,
+            self.hand.len(),
+            self.players
+        );
 
         Ok(())
     }
@@ -281,7 +351,7 @@ impl Playing {
         let rect = self.board_div.get_bounding_client_rect();
         let x = x - rect.x() as i32;
         let y = y - rect.y() as i32;
-        
+
         console_log!("Board Click: ({}, {})", x, y);
 
         if !self.is_turn {
@@ -292,7 +362,7 @@ impl Playing {
         // The player has clicked and wants to place a piece:
         if let Some(piece) = self.selected_piece {
             console_log!("placing piece: {:?}", piece);
-            
+
             if self.board.world_contains(x, y) {
                 // User is trying to place on another tile, don't let them
                 console_log!("piece already there");
@@ -302,19 +372,28 @@ impl Playing {
 
                 if in_hand {
                     self.hand.push(piece);
-                    // self.played_pieces.remove(&location);
+                // self.played_pieces.remove(&location);
                 } else {
+                    self.send_message(ClientMessage::Place(location, piece))?;
                     // self.played_pieces.insert(location, piece);
                 }
-    
+
                 self.selected_piece = None;
             }
         } else {
             if let Some((piece, in_hand)) = self.board.remove_piece_at(x, y) {
+                let coord = self.board.world_to_grid(x, y);
                 console_log!("picked up: {:?}, in hand: {}", piece, in_hand);
 
                 if in_hand {
-                    self.hand.remove(self.hand.iter().position(|x| *x == piece).expect("piece not in hand"));
+                    self.hand.remove(
+                        self.hand
+                            .iter()
+                            .position(|x| *x == piece)
+                            .expect("piece not in hand"),
+                    );
+                } else {
+                    self.send_message(ClientMessage::Pickup(coord, piece))?;
                 }
 
                 self.selected_piece = Some(piece);
@@ -324,7 +403,7 @@ impl Playing {
         }
 
         self.board.rerender();
-        console_log!("hand: {:?}", self.hand);
+        // console_log!("hand: {:?}", self.hand);
 
         Ok(())
     }
@@ -333,42 +412,94 @@ impl Playing {
         let rect = self.board_div.get_bounding_client_rect();
         let x = x - rect.x() as i32;
         let y = y - rect.y() as i32;
-        
+
         if let Some(piece) = self.selected_piece {
             if !self.board.world_contains(x, y) {
                 self.board.world_render_highlight(x, y, &piece);
             }
         }
-        
+
+        Ok(())
+    }
+
+    fn on_draw_piece(&mut self, piece: Piece) -> JsResult<()> {
+        self.hand.push(piece);
+        self.board.insert_into_hand(piece);
+        self.board.rerender();
+
+        Ok(())
+    }
+
+    fn on_invalid_board(&mut self) -> JsResult<()> {
+        self.global
+            .window
+            .alert_with_message("Please enter a valid room ID")
+    }
+
+    fn on_piece_place(&mut self, coord: Coord, piece: Piece) -> JsResult<()> {
+        console_log!("place: {:?} {:?}", coord, piece);
+
+        if let Some(old) = self.board.grid_insert(coord, piece) {
+            if !self.is_turn {
+                console_log!("[ERROR] overwriting piece: {:?}", old);
+            }
+        }
+
+        self.board.rerender();
+
+        Ok(())
+    }
+
+    fn on_pickup(&mut self, coord: Coord, piece: Piece) -> JsResult<()> {
+        console_log!("pickup: {:?} {:?}", coord, piece);
+
+        if let Some(removed) = self.board.grid_remove(coord) {
+            console_log!("{:?}: removed {:?}, expected {:?}", coord, removed, piece);
+        }
+
+        self.board.rerender();
+
         Ok(())
     }
 
     fn on_end_turn(&mut self) -> JsResult<()> {
         console_log!("on_end_turn");
-
-        let played = self.board.played_grid();
-        let (is_valid, groups) = Game::is_valid_board(&played);
-        console_log!("Grid valid?: {:?}", is_valid);
-        console_log!("Groups: {:?}", groups);
-
-        if !is_valid {
-            self.global.window.alert_with_message("Cannot end turn, the board is currently invalid.")?;
-            return Ok(())
-        }
-
-        // TODO: Method for describing what the player added to their hand!
-        let played_grid = self.board.played_grid();
-        self.send_message(ClientMessage::PlayedPieces(played_grid, self.hand.clone()))
+        self.send_message(ClientMessage::EndTurn)
     }
 
-    fn on_turn_finished(&mut self, ending_player: String, ending_drew: bool, next_player: String, pieces_remaining: usize, played_pieces: BTreeMap<(i32, i32), Piece>) -> JsResult<()> {
+    fn on_turn_finished(
+        &mut self,
+        ending_player: String,
+        ending_drew: bool,
+        next_player: String,
+        pieces_remaining: usize,
+        board: BTreeMap<Coord, Piece>,
+    ) -> JsResult<()> {
         console_log!("Turn Finished for {}", ending_player);
         console_log!("{} drew? {}", ending_player, ending_drew);
         console_log!("{} is the next player", next_player);
         console_log!("There are {} pieces remaining", pieces_remaining);
-        console_log!("{} played these pieces: {:?}", ending_player, played_pieces);
+        console_log!("board: {:?}", board);
 
-        Ok(())    
+        self.global
+            .doc
+            .get_element_by_id("current_player")
+            .unwrap()
+            .set_inner_html(&format!("Current: {}", next_player));
+
+        self.global
+            .doc
+            .get_element_by_id("last_player")
+            .unwrap()
+            .set_inner_html(&format!("Last Player: {}", ending_player));
+
+        self.global
+            .doc
+            .get_element_by_id("pieces_remaining")
+            .unwrap()
+            .set_inner_html(&format!("Pieces Remaining: {}", pieces_remaining));
+
+        Ok(())
     }
 
     pub fn on_player_joined(&mut self, name: String) -> JsResult<()> {
@@ -410,8 +541,8 @@ pub enum State {
 impl State {
     transitions!(
         CreateOrJoin => [
-            on_join_start(room: Option<String>) -> Connecting,
-            on_create_start() -> Conneting,
+            on_join_start(name: String, room: String) -> Connecting,
+            on_create_start(name: String) -> Connecting,
         ],
         Connecting => [
             on_connected() -> Playing,
@@ -424,8 +555,12 @@ impl State {
             on_joined_room(room_name: String, players: Vec<String>, hand: Vec<Piece>),
             on_board_click(x: i32, y: i32),
             on_board_move(x: i32, y: i32),
-            on_turn_finished(ending_player: String, ending_drew: bool, next_player: String, pieces_remaining: usize, played_pieces: BTreeMap<(i32, i32), Piece>),
+            on_turn_finished(ending_player: String, ending_drew: bool, next_player: String, pieces_remaining: usize, board: BTreeMap<Coord, Piece>),
             on_player_joined(name: String),
+            on_draw_piece(piece: Piece),
+            on_piece_place(coord: Coord, piece: Piece),
+            on_pickup(coord: Coord, piece: Piece),
+            on_invalid_board(),
             on_end_turn(),
             on_window_resize(),
         ]

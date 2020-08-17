@@ -3,7 +3,7 @@ use log::*;
 use std::collections::HashMap;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 
-use rkub_common::{ClientMessage, Game, Piece, ServerMessage};
+use rkub_common::{ClientMessage, Coord, Game, Piece, ServerMessage};
 
 use async_channel::{unbounded, Receiver, Sender};
 use async_lock::{Lock, LockGuard};
@@ -36,6 +36,7 @@ struct Room {
     connections: HashMap<SocketAddr, usize>,
     players: Vec<Player>,
     active_player: usize,
+    active_delta: usize,
     game: Game,
 }
 
@@ -50,6 +51,7 @@ impl Room {
             connections: HashMap::new(),
             players: Vec::new(),
             active_player: 0,
+            active_delta: 0,
             game,
         }
     }
@@ -74,39 +76,46 @@ impl Room {
                 // let idx = self.connections.remove(&addr).unwrap();
                 // self.players.remove(idx);
             }
-            ClientMessage::PlayedPieces(board, mut hand) => {                
+            ClientMessage::EndTurn => {
                 if self.connections[&addr] != self.active_player {
-                    info!("[{}] player tried to make a turn when it wasn't their turn", addr);
+                    info!(
+                        "[{}] player tried to make a turn when it wasn't their turn",
+                        addr
+                    );
                     return true;
                 }
-                
-                let (is_valid, groups) = Game::is_valid_board(&board);
-                info!("[{}] valid play? {}, groups: {}", addr, is_valid, groups.len());
+
+                let (is_valid, groups) = self.game.is_valid_board();
+                info!(
+                    "[{}] valid play? {}, groups: {}",
+                    addr,
+                    is_valid,
+                    groups.len()
+                );
 
                 if !is_valid {
-                    let msg = ServerMessage::InvalidPlay(board);
+                    let msg = ServerMessage::InvalidBoardState;
                     self.players[self.connections[&addr]].send_msg(msg).await;
-                    
                     return true;
                 }
 
-                let player = &mut self.players[self.connections[&addr]];
-                
-                hand.sort();
-                player.hand_mut().sort();
+                info!(
+                    "[{}] {} valid turn: delta: {}",
+                    addr, self.players[self.connections[&addr]].name, self.active_delta
+                );
 
-                // There was no hand change, player has to draw a piece:
-                let mut drew = false;
-                if hand == *player.hand_mut() {
+                let mut drew = self.active_delta == 0;
+                if drew {
                     if let Some(piece) = self.game.deal_piece() {
-                        player.add_to_hand(piece);
-                        player.send_msg(ServerMessage::DrawPiece(piece)).await;
-                        drew = true;
+                        let msg = ServerMessage::DrawPiece(piece);
+                        self.players[self.connections[&addr]].send_msg(msg).await;
+                    } else {
+                        drew = false;
                     }
                 }
-                let ending_player = player.name.clone();
+                self.active_delta = 0;
 
-                self.game.set_board(board.clone());
+                let ending_player = self.players[self.connections[&addr]].name.clone();
                 self.active_player = (self.active_player + 1) % self.players.len();
                 let next_player = &self.players[self.active_player];
 
@@ -115,10 +124,40 @@ impl Room {
                     ending_drew: drew,
                     next_player: next_player.name.clone(),
                     pieces_remaining: self.game.remaining_pieces().len(),
-                    board,
+                    board: self.game.board().clone(),
                 };
 
-                self.broadcast(msg).await;
+                let _ = self.broadcast(msg).await;
+            }
+            ClientMessage::Pickup(coord, piece) => {
+                if self.connections[&addr] != self.active_player {
+                    info!(
+                        "[{}] player tried to make a turn when it wasn't their turn",
+                        addr
+                    );
+                    return true;
+                }
+
+                info!("[{}] pickup: {:?} {:?}", addr, coord, piece);
+                let _ = self.game.board_mut().remove(&coord);
+                self.active_delta = self.active_delta.saturating_sub(1);
+
+                let _ = self.broadcast(ServerMessage::Pickup(coord, piece)).await;
+            }
+            ClientMessage::Place(coord, piece) => {
+                if self.connections[&addr] != self.active_player {
+                    info!(
+                        "[{}] player tried to make a turn when it wasn't their turn",
+                        addr
+                    );
+                    return true;
+                }
+
+                info!("[{}] pickup: {:?} {:?}", addr, coord, piece);
+                self.game.board_mut().insert(coord, piece);
+                self.active_delta = self.active_delta.saturating_add(1);
+
+                let _ = self.broadcast(ServerMessage::Place(coord, piece)).await;
             }
             _ => {}
         }
@@ -139,7 +178,7 @@ impl Room {
         }
 
         // let hand = self.game.deal(14);
-        
+
         let hand = self.game.deal(28);
         let player = Player::new(name.to_string(), hand.clone(), ws_sender.clone());
 
@@ -180,11 +219,7 @@ pub struct Player {
 
 impl Player {
     pub fn new(name: String, hand: Vec<Piece>, sender: Sender<ServerMessage>) -> Self {
-        Self {
-            name,
-            hand,
-            sender,
-        }
+        Self { name, hand, sender }
     }
 
     pub async fn send_msg(&mut self, msg: ServerMessage) {
@@ -207,7 +242,7 @@ async fn run_player(
     handle: RoomHandle,
 ) -> anyhow::Result<()> {
     info!("[{}] run player: {}", addr, name);
-    
+
     let (mut outgoing, mut incoming) = stream.split();
     let (ws_tx, ws_rx) = unbounded();
 
@@ -233,9 +268,9 @@ async fn run_player(
                     let message: ClientMessage = serde_json::from_str(&json)?;
                     server_write.send((addr, message)).await;
                 }
-                _ => {},
+                _ => {}
             }
-        };
+        }
 
         server_write.send((addr, ClientMessage::Close)).await;
 
@@ -293,7 +328,18 @@ async fn handle_connection(
 
                 // TODO: remove room
             }
-            ClientMessage::JoinRoom(name, room) => {}
+            ClientMessage::JoinRoom(name, room) => {
+                info!("[{}] {} joined {}", addr, name, room);
+
+                if let Some(room_handle) = rooms.lock().await.get(&room).cloned() {
+                    run_player(addr, name, ws, room_handle);
+                } else {
+                    // TODO: Handle error case
+                    error!("[{}] room {}: could not be found", addr, room);
+                }
+
+                return Ok(());
+            }
             _ => {
                 error!("Unexpected Message from {}", addr);
             }
@@ -318,6 +364,7 @@ async fn new_room_and_id(
             iter::repeat(())
                 .map(|_| rng.sample(Alphanumeric))
                 .filter(char::is_ascii_alphabetic)
+                .filter(char::is_ascii_lowercase)
                 .take(6)
                 .collect()
         };

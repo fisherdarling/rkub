@@ -1,1 +1,1 @@
-../pkg/rkub_client.js
+C:/Users/fdarl/Documents/GitHub/rkub/rkub-client/pkg/rkub_client.js

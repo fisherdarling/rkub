@@ -13,6 +13,7 @@ default = ["console_error_panic_hook", "wee_alloc"]
 [dependencies]
 rkub-common = { path = "../rkub-common" }
 serde_json = "*"
+bincode = "*"
 chrono = { version = "*", features = ["wasmbind"] }
 
 wasm-bindgen = { version = "*", features = ["serde-serialize"] }

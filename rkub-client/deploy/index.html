@@ -8,8 +8,8 @@
     <link rel="stylesheet" href="styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@500&display=swap" rel="stylesheet">
     <script type="module">
-        import init from "./rkub_client.js";
-        import { run } from "./rkub_client.js";
+        import init from "/rkub_client.js";
+        import { run } from "/rkub_client.js";
 
         async function start() {
             await init();
@@ -21,16 +21,20 @@
 </head>
 
 <body>
-    <div id="create_or_join" hidden>
-        <div id="join">
-            <input id="room_input"></input>
-            <button id="join_button">
-                Join Lobby
-            </button>
-        </div>
-        <button id="create">
-            Create A Game
-        </button>
+    <div id="create_or_join">
+        <form id="coj">
+            <fieldset>
+                <legend>Create or Join a Game Room of Rummikub!</legend>
+                <div>
+                    <input type="name" id="input_name" placeholder="Your Name" />
+                    <button type="button" id="create_room">Create Room</button>
+                </div>
+                <div>
+                    <input type="text" id="input_room" placeholder="Room ID" />
+                    <button type="button" id="join_room">Join Room</button>
+                </div>
+            </fieldset>
+        </form>
     </div>
 
     <div id="connecting" hidden>
@@ -38,35 +42,51 @@
     </div>
 
     <div id="playing" hidden>
-        <div class="container">
-            <div id="info_bar">
-                <div id="room">
-                    Room:
-                </div>
-                <div id="current_turn">
+        <div id="play_grid">
+            <div id="topbar">
+                <fieldset class="box">
+                    <legend>Room</legend>
+                    <div id="room">
 
-                </div>
-                <div id="last_player">
-                    Last Player: None
-                </div>
-                <div id="pieces_remaining">
-                    Pieces Remaining: 104
-                </div>
+                    </div>
+                </fieldset>
+                <fieldset class="box">
+                    <legend>Current Player</legend>
+                    <div id="current_player">
+                        Fisher
+                    </div>
+                </fieldset>
+                <fieldset class="box">
+                    <legend>Last Player</legend>
+                    <div id="last_player">
+                        Jessie
+                    </div>
+                </fieldset>
+                <fieldset class="box">
+                    <legend>Pieces Remaining</legend>
+                    <div id="pieces_remaining">
+                        104
+                    </div>
+                </fieldset>
             </div>
-            <div id="game">
-                <div id="board">
-                </div>
+            <fieldset id="game" class="box">
+                <legend>Game</legend>
+                <div id="board"></div>
+            </fieldset>
+            <div id="sidebar">
+                <fieldset class="box">
+                    <legend>Players</legend>
+                    <div id="players">
+
+                    </div>
+                </fieldset>
+                <button id="end_turn" class="box">End Turn</button>
             </div>
-            <div id="extra">
-                <div id="players">Players</div>
-                <div id="end_turn">
-                    End Turn
-                </div>
-                <div id="chat">Chat</div>
+            <div id="footer" class="box">
+                Footer
             </div>
         </div>
     </div>
-
 </body>
 
 </html>

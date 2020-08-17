@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -7,7 +7,9 @@ pub enum ClientMessage {
     CreateRoom(String),
     JoinRoom(String, String),
     Ready(String),
-    PlayedPieces(BTreeMap<(i32, i32), Piece>, Vec<Piece>),
+    Pickup(Coord, Piece),
+    Place(Coord, Piece),
+    EndTurn,
     Ping,
     Close,
 }
@@ -28,9 +30,11 @@ pub enum ServerMessage {
         ending_drew: bool,
         next_player: String,
         pieces_remaining: usize,
-        board: BTreeMap<(i32, i32), Piece>,
+        board: BTreeMap<Coord, Piece>,
     },
-    InvalidPlay(BTreeMap<(i32, i32), Piece>),
+    Pickup(Coord, Piece),
+    Place(Coord, Piece),
+    InvalidBoardState,
     StartTurn,
     Pong,
 }
@@ -157,7 +161,7 @@ impl Group {
 
 #[derive(Default, Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Game {
-    grid: BTreeMap<(i32, i32), Piece>,
+    grid: BTreeMap<Coord, Piece>,
     remaining_pieces: Vec<Piece>,
 }
 
@@ -183,20 +187,26 @@ impl Game {
         let mut pieces = Vec::new();
 
         for i in 1..=13 {
-            pieces.push(Piece::new(Color::Red, i));
-            pieces.push(Piece::new(Color::Blue, i));
-            pieces.push(Piece::new(Color::Yellow, i));
-            pieces.push(Piece::new(Color::Black, i));
+            for _ in 0..2 {
+                pieces.push(Piece::new(Color::Red, i));
+                pieces.push(Piece::new(Color::Blue, i));
+                pieces.push(Piece::new(Color::Yellow, i));
+                pieces.push(Piece::new(Color::Black, i));
+            }
         }
 
         pieces
+    }
+
+    pub fn board_mut(&mut self) -> &mut BTreeMap<Coord, Piece> {
+        &mut self.grid
     }
 
     pub fn remaining_pieces(&self) -> &[Piece] {
         &self.remaining_pieces
     }
 
-    pub fn board(&self) -> &BTreeMap<(i32, i32), Piece> {
+    pub fn board(&self) -> &BTreeMap<Coord, Piece> {
         &self.grid
     }
 
@@ -213,21 +223,41 @@ impl Game {
         self.remaining_pieces.pop()
     }
 
-    pub fn set_board(&mut self, grid: BTreeMap<(i32, i32), Piece>) {
+    pub fn set_board(&mut self, grid: BTreeMap<Coord, Piece>) {
         self.grid = grid;
     }
 
-    pub fn is_valid_board(grid: &BTreeMap<(i32, i32), Piece>) -> (bool, Vec<Group>) {
+    pub fn is_valid_board(&self) -> (bool, Vec<Group>) {
         let mut current_group: Option<Group> = None;
         let mut groups: Vec<Group> = Vec::new();
 
-        let min_x = grid.iter().map(|(k, _)| k.0).min().unwrap_or_default();
-        let min_y = grid.iter().map(|(k, _)| k.1).min().unwrap_or_default();
+        let min_x = self
+            .board()
+            .iter()
+            .map(|(k, _)| k.0)
+            .min()
+            .unwrap_or_default();
+        let min_y = self
+            .board()
+            .iter()
+            .map(|(k, _)| k.1)
+            .min()
+            .unwrap_or_default();
 
-        let max_x = grid.iter().map(|(k, _)| k.0).max().unwrap_or_default();
-        let max_y = grid.iter().map(|(k, _)| k.1).max().unwrap_or_default();
+        let max_x = self
+            .board()
+            .iter()
+            .map(|(k, _)| k.0)
+            .max()
+            .unwrap_or_default();
+        let max_y = self
+            .board()
+            .iter()
+            .map(|(k, _)| k.1)
+            .max()
+            .unwrap_or_default();
 
-        println!("({}, {}) ({}, {})", min_x, min_y, max_x, max_y);
+        // println!("({}, {}) ({}, {})", min_x, min_y, max_x, max_y);
 
         for y in min_y..=max_y {
             if let Some(group) = current_group.take() {
@@ -235,7 +265,7 @@ impl Game {
             }
 
             for x in min_x..=max_x {
-                if let Some(piece) = grid.get(&(x, y)) {
+                if let Some(piece) = self.board().get(&Coord(x, y)) {
                     current_group
                         .get_or_insert(Group(Vec::new()))
                         .0
@@ -256,6 +286,38 @@ impl Game {
     }
 }
 
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub struct Coord(pub i32, pub i32);
+
+impl Serialize for Coord {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let key = format!("({},{})", self.0, self.1);
+        serializer.serialize_str(&key)
+    }
+}
+
+impl<'de> Deserialize<'de> for Coord {
+    fn deserialize<D>(deserializer: D) -> Result<Coord, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s: &str = Deserialize::deserialize(deserializer)?;
+        let s = &s[1..s.len() - 1];
+
+        let mut nums = s.split(",");
+
+        let (x, y): (i32, i32) = (
+            nums.next().unwrap().parse().unwrap(),
+            nums.next().unwrap().parse().unwrap(),
+        );
+
+        Ok(Coord(x, y))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,11 +326,14 @@ mod tests {
     fn test_board_valid() {
         let mut grid = BTreeMap::new();
 
-        grid.insert((10, 8), Piece::new(Color::Yellow, 2));
-        grid.insert((11, 8), Piece::new(Color::Yellow, 3));
-        grid.insert((12, 8), Piece::new(Color::Yellow, 4));
+        grid.insert(Coord(10, 8), Piece::new(Color::Yellow, 2));
+        grid.insert(Coord(11, 8), Piece::new(Color::Yellow, 3));
+        grid.insert(Coord(12, 8), Piece::new(Color::Yellow, 4));
 
-        let (is_valid, groups) = Game::is_valid_board(&grid);
+        let mut game = Game::new();
+        game.set_board(grid);
+
+        let (is_valid, groups) = game.is_valid_board();
 
         println!("{:?}", groups);
 

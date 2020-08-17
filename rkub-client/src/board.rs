@@ -1,8 +1,8 @@
-use wasm_svg_graphics::prelude::*;
 use std::collections::BTreeMap;
+use wasm_svg_graphics::prelude::*;
 
 use crate::svg::AsSVG;
-use rkub_common::{Color, Piece, Game};
+use rkub_common::{Color, Coord, Piece};
 
 // const CELL_WIDTH: usize = 40;
 // const CELL_HEIGHT: usize = 50;
@@ -11,13 +11,13 @@ const COLS: i32 = 25;
 const ROWS: i32 = 20;
 
 pub struct Board {
-    grid: BTreeMap<(i32, i32), Piece>,
+    grid: BTreeMap<Coord, Piece>,
     // played_pieces: Vec<LocatedPiece>,
     // hand_pieces: Vec<LocatedPiece>,
     renderer: SVGRenderer,
     cell_width: i32,
     cell_height: i32,
-    last_highlight: Option<(i32, i32)>,
+    last_highlight: Option<Coord>,
 }
 
 impl Board {
@@ -55,18 +55,26 @@ impl Board {
         self.rerender();
     }
 
-    pub fn grid(&self) -> &BTreeMap<(i32, i32), Piece> {
+    pub fn grid(&self) -> &BTreeMap<Coord, Piece> {
         &self.grid
     }
 
-    pub fn played_grid(&self) -> BTreeMap<(i32, i32), Piece> {
-        self.grid.iter().filter(|((x, y), _)| *y < ROWS - 5).map(|((x, y), p)| ((*x, *y), *p)).collect()
+    pub fn played_grid(&self) -> BTreeMap<Coord, Piece> {
+        self.grid
+            .iter()
+            .filter(|(Coord(_x, y), _)| *y < ROWS - 5)
+            .map(|(Coord(x, y), p)| (Coord(*x, *y), *p))
+            .collect()
     }
 
     pub fn render(&mut self) {
-        for ((grid_x, grid_y), piece) in self.grid.iter() {
-            self.renderer.render(piece.as_svg(self.cell_width, self.cell_height), 
-                ((grid_x * self.cell_width) as f32, (grid_y * self.cell_height) as f32)
+        for (Coord(grid_x, grid_y), piece) in self.grid.iter() {
+            self.renderer.render(
+                piece.as_svg(self.cell_width, self.cell_height),
+                (
+                    (grid_x * self.cell_width) as f32,
+                    (grid_y * self.cell_height) as f32,
+                ),
             );
         }
     }
@@ -81,9 +89,10 @@ impl Board {
             .set(Attr::X2, grid_x_2)
             .set(Attr::Y2, -5)
             .set(Attr::Stroke, "black")
-            .set(Attr::StrokeWidth, 4);
+            .set(Attr::StrokeWidth, 2);
 
-        self.renderer.render(line, (grid_x_1 as f32, grid_y_1 as f32));
+        self.renderer
+            .render(line, (grid_x_1 as f32, grid_y_1 as f32));
     }
 
     pub fn rerender(&mut self) {
@@ -102,7 +111,13 @@ impl Board {
                 if let Some(piece) = pieces.next() {
                     let svg = piece.as_svg(self.cell_width, self.cell_height);
 
-                    self.renderer.render(svg, ((col * self.cell_width as usize) as f32, (row * self.cell_height as usize) as f32));
+                    self.renderer.render(
+                        svg,
+                        (
+                            (col * self.cell_width as usize) as f32,
+                            (row * self.cell_height as usize) as f32,
+                        ),
+                    );
                 } else {
                     return;
                 }
@@ -125,18 +140,17 @@ impl Board {
         let grid_x = world_x / self.cell_width;
         let grid_y = world_y / self.cell_height;
 
-        self.grid.contains_key(&(grid_x, grid_y))    
+        self.grid.contains_key(&Coord(grid_x, grid_y))
     }
 
-    pub fn world_to_grid(&self, world_x: i32, world_y: i32) -> (i32, i32) {
-        (world_x / self.cell_width, world_y / self.cell_height)
+    pub fn world_to_grid(&self, world_x: i32, world_y: i32) -> Coord {
+        Coord(world_x / self.cell_width, world_y / self.cell_height)
     }
 
     pub fn world_render_highlight(&mut self, world_x: i32, world_y: i32, piece: &Piece) {
-        let grid_x = world_x / self.cell_width;
-        let grid_y = world_y / self.cell_height;
+        let coord = self.world_to_grid(world_x, world_y);
 
-        if self.last_highlight != Some((grid_x, grid_y)) {
+        if self.last_highlight != Some(coord) {
             let background = SVGElem::new(Tag::Rect)
                 .set(Attr::Fill, "lightgrey")
                 .set(Attr::Width, self.cell_width)
@@ -157,44 +171,84 @@ impl Board {
                 .set_inner(&piece.num.to_string());
 
             let piece = SVGElem::new(Tag::G).append(background).append(num);
-            
-            self.rerender();
-            self.renderer.render(piece, ((grid_x * self.cell_width) as f32, (grid_y * self.cell_height) as f32));
 
-            self.last_highlight = Some((grid_x, grid_y));
+            self.rerender();
+            self.renderer.render(
+                piece,
+                (
+                    (coord.0 * self.cell_width) as f32,
+                    (coord.1 * self.cell_height) as f32,
+                ),
+            );
+
+            self.last_highlight = Some(coord);
         }
     }
 
     pub fn remove_piece_at(&mut self, world_x: i32, world_y: i32) -> Option<(Piece, bool)> {
-        let grid_x = world_x / self.cell_width;
-        let grid_y = world_y / self.cell_height;
-        
-        let in_hand = grid_y >= ROWS - 5;
+        let coord = self.world_to_grid(world_x, world_y);
 
-        self.grid.remove(&(grid_x, grid_y)).map(|p| (p, in_hand))
+        let in_hand = coord.1 >= ROWS - 5;
+
+        self.grid.remove(&coord).map(|p| (p, in_hand))
+    }
+
+    pub fn grid_remove(&mut self, coord: Coord) -> Option<Piece> {
+        self.grid.remove(&coord)
     }
 
     pub fn world_insert(&mut self, world_x: i32, world_y: i32, piece: Piece) -> bool {
-        let grid_x = world_x / self.cell_width;
-        let grid_y = world_y / self.cell_height;
+        let coord = self.world_to_grid(world_x, world_y);
 
-        self.grid.insert((grid_x, grid_y), piece);
+        self.grid.insert(coord, piece);
 
-        grid_y >= ROWS - 5
+        coord.1 >= ROWS - 5
+    }
+
+    pub fn grid_insert(&mut self, coord: Coord, piece: Piece) -> Option<Piece> {
+        self.grid.insert(coord, piece)
     }
 
     pub fn insert_as_hand(&mut self, pieces: &[Piece]) {
-        let mut x = 0;
-        let mut y = ROWS - 5;
+        let mut red = pieces.iter().filter(|p| p.color == Color::Red);
+        let mut blue = pieces.iter().filter(|p| p.color == Color::Blue);
+        let mut yellow = pieces.iter().filter(|p| p.color == Color::Yellow);
+        let mut black = pieces
+            .iter()
+            .filter(|p| p.color == Color::Black || p.color == Color::Joker);
 
-        for piece in pieces {
-            self.grid.insert((x, y), *piece);
-            
-            if x + 1 > COLS {
-                y = (y + 1) % ROWS;
+        for x in 0..COLS - 1 {
+            if let Some(&p) = red.next() {
+                self.grid.insert(Coord(x, ROWS - 5), p);
             }
-            
-            x = (x + 1) % COLS; 
+
+            if let Some(&p) = blue.next() {
+                self.grid.insert(Coord(x, ROWS - 4), p);
+            }
+
+            if let Some(&p) = yellow.next() {
+                self.grid.insert(Coord(x, ROWS - 3), p);
+            }
+
+            if let Some(&p) = black.next() {
+                self.grid.insert(Coord(x, ROWS - 2), p);
+            }
+        }
+    }
+
+    pub fn insert_into_hand(&mut self, piece: Piece) {
+        let y = match piece.color {
+            Color::Red => ROWS - 5,
+            Color::Blue => ROWS - 4,
+            Color::Yellow => ROWS - 3,
+            Color::Black | Color::Joker => ROWS - 2,
+        };
+
+        for x in 0..COLS - 1 {
+            if !self.grid.contains_key(&Coord(x, y)) {
+                self.grid.insert(Coord(x, y), piece);
+                break;
+            }
         }
     }
 }
@@ -205,7 +259,6 @@ pub struct LocatedPiece {
     pub y: f32,
     pub piece: Piece,
 }
-
 
 impl AsSVG for Piece {
     fn as_svg(&self, width: i32, height: i32) -> SVGElem {

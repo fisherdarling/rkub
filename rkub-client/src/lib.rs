@@ -1,21 +1,19 @@
+#![allow(unused_unsafe)]
+#![allow(deprecated)]
 mod board;
 mod states;
 mod svg;
-mod utils;
-mod piece_view;
 
-use chrono::{DateTime, Utc};
-use log::*;
+use chrono::Utc;
+
 use std::sync::Mutex;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{convert::FromWasmAbi, JsCast};
-use web_sys::{
-    Document, Element, EventTarget, FileReader, MessageEvent, ProgressEvent, WebSocket, Window,
-};
+use web_sys::EventTarget;
 
 use crate::states::*;
-use crate::svg::AsSVG;
-use rkub_common::{ClientMessage, ServerMessage, Piece, Color};
+
+use rkub_common::ServerMessage;
 
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
@@ -46,10 +44,11 @@ where
     T: FromWasmAbi + 'static,
 {
     let cb = build_cb(f);
-    
+
     let target = obj
         .dyn_ref::<EventTarget>()
         .expect("Could not convert into `EventTarget`");
+
     target
         .add_event_listener_with_callback(name, cb.as_ref().unchecked_ref())
         .expect("Could not add event listener");
@@ -66,7 +65,7 @@ extern "C" {
 
 #[macro_export]
 macro_rules! console_log {
-    ($($t:tt)*) => (crate::log(&format!("[{}] {}", crate::timestamp(), &format_args!($($t)*).to_string())))
+    ($($t:tt)*) => (unsafe { crate::log(&format!("[{}] {}", crate::timestamp(), &format_args!($($t)*).to_string())) })
 }
 
 fn timestamp() -> String {
@@ -75,22 +74,38 @@ fn timestamp() -> String {
 
 fn on_message(msg: ServerMessage) -> JsResult<()> {
     match msg {
-        ServerMessage::JoinedRoom { room_name, players, hand } => {
-            crate::STATE.lock().unwrap().on_joined_room(room_name, players, hand)
-        }
+        ServerMessage::JoinedRoom {
+            room_name,
+            players,
+            hand,
+        } => crate::STATE
+            .lock()
+            .unwrap()
+            .on_joined_room(room_name, players, hand),
         ServerMessage::TurnFinished {
-            ending_player, ending_drew, next_player,
-            pieces_remaining, board
-        } => {
-            crate::STATE.lock().unwrap().on_turn_finished(ending_player, ending_drew, next_player, pieces_remaining, board)
-        }
-        ServerMessage::PlayerJoined(name) => {
-            crate::STATE.lock().unwrap().on_player_joined(name)
-        }
+            ending_player,
+            ending_drew,
+            next_player,
+            pieces_remaining,
+            board,
+        } => crate::STATE.lock().unwrap().on_turn_finished(
+            ending_player,
+            ending_drew,
+            next_player,
+            pieces_remaining,
+            board,
+        ),
+        ServerMessage::PlayerJoined(name) => crate::STATE.lock().unwrap().on_player_joined(name),
         ServerMessage::Pong => {
             console_log!("Server: Pong");
             Ok(())
         }
+        ServerMessage::DrawPiece(piece) => crate::STATE.lock().unwrap().on_draw_piece(piece),
+        ServerMessage::Place(coord, piece) => {
+            crate::STATE.lock().unwrap().on_piece_place(coord, piece)
+        }
+
+        ServerMessage::Pickup(coord, piece) => crate::STATE.lock().unwrap().on_pickup(coord, piece),
         _ => {
             console_log!("unhandled message: {:?}", msg);
             Ok(())

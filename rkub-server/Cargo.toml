@@ -11,6 +11,7 @@ log = "*"
 env_logger = "*"
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
+bincode = "*"
 smol = "*"
 async-channel = "*"
 async-lock = "*"
