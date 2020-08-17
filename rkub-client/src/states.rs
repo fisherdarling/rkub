@@ -193,7 +193,7 @@ impl Connecting {
         let html = self.global.doc.get_element_by_id("connecting").unwrap();
         html.toggle_attribute("hidden")?;
 
-        Playing::new(self.global, self.ws, self.player_name)
+        Playing::new(self.global, self.ws, self.player_name, self.room_name)
     }
 }
 
@@ -217,7 +217,12 @@ pub struct Playing {
 }
 
 impl Playing {
-    pub fn new(global: Global, ws: WebSocket, player_name: String) -> JsResult<Self> {
+    pub fn new(
+        global: Global,
+        ws: WebSocket,
+        player_name: String,
+        room_name: Option<String>,
+    ) -> JsResult<Self> {
         // Display the game board:
         let html = global.doc.get_element_by_id("playing").unwrap();
         html.toggle_attribute("hidden")?;
@@ -279,15 +284,28 @@ impl Playing {
 
         console_log!("sending join message");
 
-        let join_message = serde_json::to_string(&ClientMessage::CreateRoom(player_name)).unwrap();
-        ws.send_with_str(&join_message)?;
+        let mut is_turn = false;
+        if let Some(room_name) = room_name {
+            let join_message =
+                serde_json::to_string(&ClientMessage::JoinRoom(player_name, room_name)).unwrap();
+            ws.send_with_str(&join_message)?;
+        } else {
+            let join_message =
+                serde_json::to_string(&ClientMessage::CreateRoom(player_name)).unwrap();
+            ws.send_with_str(&join_message)?;
+            console_log!("created room");
+
+            is_turn = true;
+        }
+
+        console_log!("is turn: {}", is_turn);
 
         let this = Self {
             ws,
             global,
             board,
             room_name: String::new(),
-            is_turn: true,
+            is_turn,
             // played_pieces: BTreeMap::new(),
             players: Vec::new(),
             hand: Vec::new(),
@@ -340,7 +358,7 @@ impl Playing {
         let mut inner_html = String::new();
 
         for player in &self.players {
-            inner_html.push_str(&format!("<tr>{}</tr>", player));
+            inner_html.push_str(&format!("<tr><td>{}</td></tr>", player));
         }
 
         inner_html = format!("<table>{}</table>", inner_html);
@@ -354,11 +372,6 @@ impl Playing {
 
         console_log!("Board Click: ({}, {})", x, y);
 
-        if !self.is_turn {
-            console_log!("not your turn");
-            return Ok(());
-        }
-
         // The player has clicked and wants to place a piece:
         if let Some(piece) = self.selected_piece {
             console_log!("placing piece: {:?}", piece);
@@ -367,43 +380,68 @@ impl Playing {
                 // User is trying to place on another tile, don't let them
                 console_log!("piece already there");
             } else {
-                let in_hand = self.board.world_insert(x, y, piece);
-                let location = self.board.world_to_grid(x, y);
+                let coord = self.board.world_to_grid(x, y);
 
-                if in_hand {
+                console_log!(
+                    "in_hand?: ({}, {}) => {}",
+                    coord.0,
+                    coord.1,
+                    self.board.in_hand(coord.0, coord.1)
+                );
+
+                // Player is placing in hand, always succeeds:
+                if self.board.in_hand(coord.0, coord.1) {
+                    let _ = self.board.world_insert(x, y, piece);
                     self.hand.push(piece);
-                // self.played_pieces.remove(&location);
+                } else if !self.is_turn {
+                    // Player is placing on board and it's not their turn
+                    self.global.window.alert_with_message(
+                        "You cannot place on the board when it is not your turn.",
+                    )?;
+
+                    return Ok(());
                 } else {
-                    self.send_message(ClientMessage::Place(location, piece))?;
-                    // self.played_pieces.insert(location, piece);
+                    // Player is placing on board and it's their turn, place
+                    // the piece and send the message.
+                    let _ = self.board.world_insert(x, y, piece);
+                    self.send_message(ClientMessage::Place(coord, piece))?;
                 }
 
                 self.selected_piece = None;
             }
         } else {
-            if let Some((piece, in_hand)) = self.board.remove_piece_at(x, y) {
-                let coord = self.board.world_to_grid(x, y);
-                console_log!("picked up: {:?}, in hand: {}", piece, in_hand);
+            let coord = self.board.world_to_grid(x, y);
 
-                if in_hand {
+            console_log!(
+                "in_hand?: ({}, {}) => {}",
+                coord.0,
+                coord.1,
+                self.board.in_hand(coord.0, coord.1)
+            );
+
+            // A pickup in the player's hand always succeeds
+            if self.board.in_hand(coord.0, coord.1) {
+                if let Some(piece) = self.board.grid_remove(coord) {
                     self.hand.remove(
                         self.hand
                             .iter()
                             .position(|x| *x == piece)
                             .expect("piece not in hand"),
                     );
-                } else {
-                    self.send_message(ClientMessage::Pickup(coord, piece))?;
+                    self.selected_piece = Some(piece);
                 }
-
-                self.selected_piece = Some(piece);
-            } else {
-                console_log!("no piece there");
+            } else if self.is_turn {
+                if let Some(piece) = self.board.grid_remove(coord) {
+                    // Tell the server we picked up the piece.
+                    self.send_message(ClientMessage::Pickup(coord, piece))?;
+                    self.selected_piece = Some(piece);
+                } else {
+                    console_log!("no piece there");
+                }
             }
         }
 
         self.board.rerender();
-        // console_log!("hand: {:?}", self.hand);
 
         Ok(())
     }
@@ -433,31 +471,35 @@ impl Playing {
     fn on_invalid_board(&mut self) -> JsResult<()> {
         self.global
             .window
-            .alert_with_message("Please enter a valid room ID")
+            .alert_with_message("The board is in an invalid state")
     }
 
     fn on_piece_place(&mut self, coord: Coord, piece: Piece) -> JsResult<()> {
-        console_log!("place: {:?} {:?}", coord, piece);
+        if !self.is_turn {
+            console_log!("place: {:?} {:?}", coord, piece);
 
-        if let Some(old) = self.board.grid_insert(coord, piece) {
-            if !self.is_turn {
-                console_log!("[ERROR] overwriting piece: {:?}", old);
+            if let Some(old) = self.board.grid_insert(coord, piece) {
+                if !self.is_turn {
+                    console_log!("[ERROR] overwriting piece: {:?}", old);
+                }
             }
-        }
 
-        self.board.rerender();
+            self.board.rerender();
+        }
 
         Ok(())
     }
 
     fn on_pickup(&mut self, coord: Coord, piece: Piece) -> JsResult<()> {
-        console_log!("pickup: {:?} {:?}", coord, piece);
+        if !self.is_turn {
+            console_log!("pickup: {:?} {:?}", coord, piece);
 
-        if let Some(removed) = self.board.grid_remove(coord) {
-            console_log!("{:?}: removed {:?}, expected {:?}", coord, removed, piece);
+            if let Some(removed) = self.board.grid_remove(coord) {
+                console_log!("{:?}: removed {:?}, expected {:?}", coord, removed, piece);
+            }
+
+            self.board.rerender();
         }
-
-        self.board.rerender();
 
         Ok(())
     }
@@ -485,29 +527,45 @@ impl Playing {
             .doc
             .get_element_by_id("current_player")
             .unwrap()
-            .set_inner_html(&format!("Current: {}", next_player));
+            .set_inner_html(&format!("{}", next_player));
 
         self.global
             .doc
             .get_element_by_id("last_player")
             .unwrap()
-            .set_inner_html(&format!("Last Player: {}", ending_player));
+            .set_inner_html(&format!("{}", ending_player));
 
         self.global
             .doc
             .get_element_by_id("pieces_remaining")
             .unwrap()
-            .set_inner_html(&format!("Pieces Remaining: {}", pieces_remaining));
+            .set_inner_html(&format!("{}", pieces_remaining));
 
         Ok(())
     }
 
+    pub fn on_turn_start(&mut self) -> JsResult<()> {
+        self.is_turn = true;
+        Ok(())
+    }
+
+    pub fn on_end_turn_valid(&mut self) -> JsResult<()> {
+        self.is_turn = false;
+        Ok(())
+    }
+
     pub fn on_player_joined(&mut self, name: String) -> JsResult<()> {
+        console_log!("{} joined", name);
+
         self.players.push(name);
         self.update_players();
 
         Ok(())
     }
+
+    // pub fn on_game_won(&mut self, winner: String) -> JsResult<()> {
+    //     // self
+    // }
 
     pub fn on_window_resize(&mut self) -> JsResult<()> {
         console_log!("resize");
@@ -555,13 +613,16 @@ impl State {
             on_joined_room(room_name: String, players: Vec<String>, hand: Vec<Piece>),
             on_board_click(x: i32, y: i32),
             on_board_move(x: i32, y: i32),
+            on_turn_start(),
             on_turn_finished(ending_player: String, ending_drew: bool, next_player: String, pieces_remaining: usize, board: BTreeMap<Coord, Piece>),
             on_player_joined(name: String),
             on_draw_piece(piece: Piece),
             on_piece_place(coord: Coord, piece: Piece),
             on_pickup(coord: Coord, piece: Piece),
+            // on_game_won(winner: String),
             on_invalid_board(),
             on_end_turn(),
+            on_end_turn_valid(),
             on_window_resize(),
         ]
     );

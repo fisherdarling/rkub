@@ -22,6 +22,7 @@ pub enum ServerMessage {
         hand: Vec<Piece>,
     },
     StartGame,
+    StartTurn,
     PlayerJoined(String),
     GameAlreadyStarted(String),
     DrawPiece(Piece),
@@ -32,10 +33,11 @@ pub enum ServerMessage {
         pieces_remaining: usize,
         board: BTreeMap<Coord, Piece>,
     },
+    PlayerWon(String),
+    EndTurnValid,
     Pickup(Coord, Piece),
     Place(Coord, Piece),
     InvalidBoardState,
-    StartTurn,
     Pong,
 }
 

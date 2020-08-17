@@ -36,7 +36,7 @@ struct Room {
     connections: HashMap<SocketAddr, usize>,
     players: Vec<Player>,
     active_player: usize,
-    active_delta: usize,
+    active_delta: i8,
     game: Game,
 }
 
@@ -86,12 +86,7 @@ impl Room {
                 }
 
                 let (is_valid, groups) = self.game.is_valid_board();
-                info!(
-                    "[{}] valid play? {}, groups: {}",
-                    addr,
-                    is_valid,
-                    groups.len()
-                );
+                info!("[{}] valid play? {}, groups: {:?}", addr, is_valid, groups);
 
                 if !is_valid {
                     let msg = ServerMessage::InvalidBoardState;
@@ -113,11 +108,24 @@ impl Room {
                         drew = false;
                     }
                 }
+
+                let msg = ServerMessage::EndTurnValid;
+                self.players[self.connections[&addr]].send_msg(msg).await;
+
+                info!(
+                    "[{}] {} hand length: {}",
+                    addr,
+                    self.players[self.connections[&addr]].name,
+                    self.players[self.connections[&addr]].hand.len()
+                );
+
                 self.active_delta = 0;
 
                 let ending_player = self.players[self.connections[&addr]].name.clone();
                 self.active_player = (self.active_player + 1) % self.players.len();
-                let next_player = &self.players[self.active_player];
+                let next_player = &mut self.players[self.active_player];
+
+                next_player.send_msg(ServerMessage::StartTurn).await;
 
                 let msg = ServerMessage::TurnFinished {
                     ending_player,
@@ -140,7 +148,11 @@ impl Room {
 
                 info!("[{}] pickup: {:?} {:?}", addr, coord, piece);
                 let _ = self.game.board_mut().remove(&coord);
-                self.active_delta = self.active_delta.saturating_sub(1);
+
+                let player = &mut self.players[self.connections[&addr]];
+                player.hand.push(piece);
+
+                self.active_delta -= 1;
 
                 let _ = self.broadcast(ServerMessage::Pickup(coord, piece)).await;
             }
@@ -153,9 +165,18 @@ impl Room {
                     return true;
                 }
 
-                info!("[{}] pickup: {:?} {:?}", addr, coord, piece);
+                info!("[{}] place: {:?} {:?}", addr, coord, piece);
                 self.game.board_mut().insert(coord, piece);
-                self.active_delta = self.active_delta.saturating_add(1);
+                self.active_delta += 1;
+
+                let player = &mut self.players[self.connections[&addr]];
+
+                for i in 0..player.hand.len() {
+                    if player.hand[i] == piece {
+                        player.hand.swap_remove(i);
+                        break;
+                    }
+                }
 
                 let _ = self.broadcast(ServerMessage::Place(coord, piece)).await;
             }
@@ -223,7 +244,7 @@ impl Player {
     }
 
     pub async fn send_msg(&mut self, msg: ServerMessage) {
-        self.sender.send(msg).await;
+        let _ = self.sender.send(msg).await;
     }
 
     pub fn add_to_hand(&mut self, piece: Piece) {
@@ -312,8 +333,12 @@ async fn handle_connection(
                 let room = Lock::new(Room::new());
                 let handle = RoomHandle { send, room };
 
+                info!("Creating a new ID...");
+
                 let new_id = {
+                    info!("Locking room");
                     let map = rooms.lock().await;
+                    info!("Room locked");
                     new_room_and_id(map, handle.clone()).await
                 };
 
@@ -328,11 +353,13 @@ async fn handle_connection(
 
                 // TODO: remove room
             }
-            ClientMessage::JoinRoom(name, room) => {
-                info!("[{}] {} joined {}", addr, name, room);
+            ClientMessage::JoinRoom(player_name, room) => {
+                info!("[{}] {} joined {}", addr, player_name, room);
 
-                if let Some(room_handle) = rooms.lock().await.get(&room).cloned() {
-                    run_player(addr, name, ws, room_handle);
+                let handle = { rooms.lock().await.get(&room).cloned() };
+
+                if let Some(room_handle) = handle {
+                    run_player(addr, player_name, ws, room_handle).await?;
                 } else {
                     // TODO: Handle error case
                     error!("[{}] room {}: could not be found", addr, room);

@@ -106,6 +106,9 @@ fn on_message(msg: ServerMessage) -> JsResult<()> {
         }
 
         ServerMessage::Pickup(coord, piece) => crate::STATE.lock().unwrap().on_pickup(coord, piece),
+        ServerMessage::InvalidBoardState => crate::STATE.lock().unwrap().on_invalid_board(),
+        ServerMessage::StartTurn => crate::STATE.lock().unwrap().on_turn_start(),
+        ServerMessage::EndTurnValid => crate::STATE.lock().unwrap().on_end_turn_valid(),
         _ => {
             console_log!("unhandled message: {:?}", msg);
             Ok(())

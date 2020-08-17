@@ -126,7 +126,7 @@ impl Board {
     }
 
     pub fn in_hand(&self, grid_x: i32, grid_y: i32) -> bool {
-        grid_x > 0 && grid_y >= ROWS - 5
+        grid_x >= 0 && grid_y >= ROWS - 5
     }
 
     pub fn world_in_hand(&self, world_x: i32, world_y: i32) -> bool {
