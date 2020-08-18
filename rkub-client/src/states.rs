@@ -202,17 +202,25 @@ pub struct Playing {
     pub ws: WebSocket,
     pub global: Global,
     pub board: Board,
+    pub hand: Board,
     pub room_name: String,
     pub is_turn: bool,
     pub active_player: usize,
     pub players: Vec<String>,
     pub disconnected: Vec<usize>,
-    pub hand: Vec<Piece>,
+    // pub hand: Vec<Piece>,
     pub selected_piece: Option<Piece>,
-    pub board_div: Element,
     pub players_div: Element,
+    pub board_div: Element,
+    pub board_svg: Element,
+    pub hand_div: Element,
+    pub hand_svg: Element,
     pub on_board_click: JsClosure<PointerEvent>,
     pub on_board_move: JsClosure<PointerEvent>,
+    pub on_board_leave: JsClosure<Event>,
+    pub on_hand_click: JsClosure<PointerEvent>,
+    pub on_hand_move: JsClosure<PointerEvent>,
+    pub on_hand_leave: JsClosure<Event>,
     pub on_end_turn: JsClosure<PointerEvent>,
     pub on_window_resize: JsClosure<Event>,
 }
@@ -253,22 +261,48 @@ impl Playing {
         })
         .forget();
 
-        let board = Board::new();
-
         let board_div = global.doc.get_element_by_id("board").unwrap();
+        // let board_svg = global.doc.get_element_by_id("board_svg").unwrap();
+
+        let hand_div = global.doc.get_element_by_id("hand").unwrap();
+        // let hand_svg = global.doc.get_element_by_id("hand_svg").unwrap();
+
         let players_div = global.doc.get_element_by_id("players").unwrap();
 
-        console_log!("Board Div Child: {:?}", board_div.first_child());
+        let board = Board::new(15, 25, &board_div, "board");
+        let board_svg = board_div.get_elements_by_tag_name("svg").item(0).unwrap();
 
-        let svg = board_div.get_elements_by_tag_name("svg").item(0).unwrap();
-        let on_board_click = set_event_cb(&svg, "click", move |e: PointerEvent| {
+        let hand = Board::new(5, 25, &hand_div, "hand");
+        let hand_svg = hand_div.get_elements_by_tag_name("svg").item(0).unwrap();
+
+        let on_board_click = set_event_cb(&board_svg, "click", move |e: PointerEvent| {
             e.prevent_default();
             STATE.lock().unwrap().on_board_click(e.x(), e.y())
         });
 
-        let on_board_move = set_event_cb(&svg, "mousemove", move |e: PointerEvent| {
+        let on_board_move = set_event_cb(&board_svg, "mousemove", move |e: PointerEvent| {
             e.prevent_default();
             STATE.lock().unwrap().on_board_move(e.x(), e.y())
+        });
+
+        let on_board_leave = set_event_cb(&board_svg, "mouseleave", move |e: Event| {
+            e.prevent_default();
+            STATE.lock().unwrap().on_board_leave()
+        });
+
+        let on_hand_click = set_event_cb(&hand_svg, "click", move |e: PointerEvent| {
+            e.prevent_default();
+            STATE.lock().unwrap().on_hand_click(e.x(), e.y())
+        });
+
+        let on_hand_move = set_event_cb(&hand_svg, "mousemove", move |e: PointerEvent| {
+            e.prevent_default();
+            STATE.lock().unwrap().on_hand_move(e.x(), e.y())
+        });
+
+        let on_hand_leave = set_event_cb(&hand_svg, "mouseleave", move |e: Event| {
+            e.prevent_default();
+            STATE.lock().unwrap().on_hand_leave()
         });
 
         let end_turn = global.doc.get_element_by_id("end_turn").unwrap();
@@ -305,17 +339,24 @@ impl Playing {
             ws,
             global,
             board,
+            hand,
             room_name: String::new(),
             is_turn,
             active_player: 0,
             players: Vec::new(),
             disconnected: Vec::new(),
-            hand: Vec::new(),
             selected_piece: None,
             board_div,
+            board_svg,
+            hand_div,
+            hand_svg,
             players_div,
             on_board_click,
             on_board_move,
+            on_board_leave,
+            on_hand_click,
+            on_hand_move,
+            on_hand_leave,
             on_end_turn,
             on_window_resize,
         };
@@ -348,20 +389,19 @@ impl Playing {
             .set_inner_html(&format!("{}", pieces_remaining));
 
         *self.board.grid_mut() = board;
-        self.board.insert_as_hand(&hand);
-
         self.room_name = room_name;
         self.players = players;
-        self.hand = hand;
+
+        self.hand.insert_as_hand(&hand);
 
         self.board.rerender();
-
+        self.hand.rerender();
         self.update_players();
 
         console_log!(
             "[{}] {:?} pieces, {:?}",
             self.room_name,
-            self.hand.len(),
+            self.hand.grid().len(),
             self.players
         );
 
@@ -392,71 +432,34 @@ impl Playing {
     }
 
     fn on_board_click(&mut self, x: i32, y: i32) -> JsResult<()> {
-        let rect = self.board_div.get_bounding_client_rect();
+        let rect = self.board_svg.get_bounding_client_rect();
         let x = x - rect.x() as i32;
         let y = y - rect.y() as i32;
 
-        console_log!("Board Click: ({}, {})", x, y);
+        let coord = self.board.world_to_grid(x, y);
+        console_log!("Board Click: ({}, {})", coord.0, coord.1);
 
         // The player has clicked and wants to place a piece:
         if let Some(piece) = self.selected_piece {
             console_log!("placing piece: {:?}", piece);
 
-            if self.board.world_contains(x, y) {
-                // User is trying to place on another tile, don't let them
+            if self.board.contains(coord) {
+                // user is trying to place on another tile, don't let them
                 console_log!("piece already there");
+            } else if !self.is_turn {
+                self.global.window.alert_with_message(
+                    "You cannot place on the board when it is not your turn.",
+                )?;
             } else {
-                let coord = self.board.world_to_grid(x, y);
-
-                console_log!(
-                    "in_hand?: ({}, {}) => {}",
-                    coord.0,
-                    coord.1,
-                    self.board.in_hand(coord.0, coord.1)
-                );
-
-                // Player is placing in hand, always succeeds:
-                if self.board.in_hand(coord.0, coord.1) {
-                    let _ = self.board.world_insert(x, y, piece);
-                    self.hand.push(piece);
-                } else if !self.is_turn {
-                    // Player is placing on board and it's not their turn
-                    self.global.window.alert_with_message(
-                        "You cannot place on the board when it is not your turn.",
-                    )?;
-
-                    return Ok(());
-                } else {
-                    // Player is placing on board and it's their turn, place
-                    // the piece and send the message.
-                    let _ = self.board.world_insert(x, y, piece);
-                    self.send_message(ClientMessage::Place(coord, piece))?;
-                }
-
+                // Player is placing on board and it's their turn, place
+                // the piece and send the message.
+                let _ = self.board.world_insert(x, y, piece);
+                self.send_message(ClientMessage::Place(coord, piece))?;
                 self.selected_piece = None;
             }
         } else {
-            let coord = self.board.world_to_grid(x, y);
-
-            console_log!(
-                "in_hand?: ({}, {}) => {}",
-                coord.0,
-                coord.1,
-                self.board.in_hand(coord.0, coord.1)
-            );
-
-            // A pickup in the player's hand always succeeds
-            if self.board.in_hand(coord.0, coord.1) {
-                if let Some(piece) = self.board.grid_remove(coord) {
-                    self.hand.remove(
-                        self.hand
-                            .iter()
-                            .position(|x| *x == piece)
-                            .expect("piece not in hand"),
-                    );
-                    self.selected_piece = Some(piece);
-                }
-            } else if self.is_turn {
+            // Player wants to pickup a piece
+            if self.is_turn {
                 if let Some(piece) = self.board.grid_remove(coord) {
                     // Tell the server we picked up the piece.
                     self.send_message(ClientMessage::Pickup(coord, piece))?;
@@ -473,7 +476,7 @@ impl Playing {
     }
 
     fn on_board_move(&mut self, x: i32, y: i32) -> JsResult<()> {
-        let rect = self.board_div.get_bounding_client_rect();
+        let rect = self.board_svg.get_bounding_client_rect();
         let x = x - rect.x() as i32;
         let y = y - rect.y() as i32;
 
@@ -486,10 +489,66 @@ impl Playing {
         Ok(())
     }
 
+    fn on_board_leave(&mut self) -> JsResult<()> {
+        self.board.remove_highlight();
+        Ok(())
+    }
+
+    fn on_hand_click(&mut self, x: i32, y: i32) -> JsResult<()> {
+        let rect = self.hand_svg.get_bounding_client_rect();
+        let x = x - rect.x() as i32;
+        let y = y - rect.y() as i32;
+
+        let coord = self.board.world_to_grid(x, y);
+        console_log!("Hand Click: ({}, {})", coord.0, coord.1);
+
+        // The player has clicked and wants to place a piece in their hand:
+        if let Some(piece) = self.selected_piece {
+            console_log!("placing piece: {:?}", piece);
+            if self.board.contains(coord) {
+                // user is trying to place on another tile, don't let them
+                console_log!("piece already there");
+            } else {
+                // Player is placing on board and it's in their hand, always succeed
+                let _ = self.hand.world_insert(x, y, piece);
+                self.selected_piece = None;
+            }
+        } else if let Some(piece) = self.hand.grid_remove(coord) {
+            // Player wants to pickup a piece in their hand
+            self.selected_piece = Some(piece);
+        } else {
+            console_log!("no piece there");
+        }
+
+        console_log!("Hand: {:?}", self.hand.grid());
+
+        self.hand.rerender();
+
+        Ok(())
+    }
+
+    fn on_hand_move(&mut self, x: i32, y: i32) -> JsResult<()> {
+        let rect = self.hand_svg.get_bounding_client_rect();
+        let x = x - rect.x() as i32;
+        let y = y - rect.y() as i32;
+
+        if let Some(piece) = self.selected_piece {
+            if !self.hand.world_contains(x, y) {
+                self.hand.world_render_highlight(x, y, &piece);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn on_hand_leave(&mut self) -> JsResult<()> {
+        self.hand.remove_highlight();
+        Ok(())
+    }
+
     fn on_draw_piece(&mut self, piece: Piece) -> JsResult<()> {
-        self.hand.push(piece);
-        self.board.insert_into_hand(piece);
-        self.board.rerender();
+        self.hand.insert_into_hand(piece);
+        self.hand.rerender();
 
         Ok(())
     }
@@ -644,6 +703,7 @@ impl Playing {
     pub fn on_window_resize(&mut self) -> JsResult<()> {
         console_log!("resize");
         self.board.resize();
+        self.hand.resize();
         Ok(())
     }
 
@@ -659,6 +719,7 @@ impl Playing {
 
     pub fn rerender(&mut self) {
         self.board.rerender();
+        self.hand.rerender();
     }
 }
 
@@ -687,6 +748,10 @@ impl State {
             on_joined_room(room_name: String, players: Vec<String>, hand: Vec<Piece>, pieces_left: usize, board: BTreeMap<Coord, Piece>),
             on_board_click(x: i32, y: i32),
             on_board_move(x: i32, y: i32),
+            on_hand_click(x: i32, y: i32),
+            on_hand_move(x: i32, y: i32),
+            on_board_leave(),
+            on_hand_leave(),
             on_turn_start(),
             on_turn_finished(ending_player: String, ending_drew: bool, next_player: usize, pieces_remaining: usize, board: BTreeMap<Coord, Piece>),
             on_player_joined(name: String),

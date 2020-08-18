@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use wasm_bindgen::JsCast;
 use wasm_svg_graphics::prelude::*;
 
 use crate::svg::AsSVG;
@@ -7,49 +8,61 @@ use rkub_common::{Color, Coord, Piece};
 // const CELL_WIDTH: usize = 40;
 // const CELL_HEIGHT: usize = 50;
 
-const COLS: i32 = 25;
-const ROWS: i32 = 20;
+// const self.cols: i32 = 25;
+// const self.rows: i32 = 20;
 
 pub struct Board {
     grid: BTreeMap<Coord, Piece>,
     // played_pieces: Vec<LocatedPiece>,
     // hand_pieces: Vec<LocatedPiece>,
     renderer: SVGRenderer,
+    root_name: &'static str,
+    rows: i32,
+    cols: i32,
     cell_width: i32,
     cell_height: i32,
     last_highlight: Option<Coord>,
 }
 
 impl Board {
-    pub fn new() -> Self {
-        let document = web_sys::window().unwrap().document().unwrap();
-        let board = document.get_element_by_id("board").unwrap();
-
-        let width = board.client_width();
-        let height = board.client_height();
-        let renderer = SVGRenderer::new("board").expect("Unable to create renderer");
+    pub fn new(
+        rows: i32,
+        cols: i32,
+        root_element: &web_sys::Element,
+        root_name: &'static str,
+    ) -> Self {
+        let width = root_element.client_width();
+        let height = root_element.client_height();
+        let renderer = SVGRenderer::new(root_name).expect("Unable to create renderer");
         renderer.adjust_viewbox(0, 0, width, height);
 
         Self {
             grid: BTreeMap::new(),
-            // played_pieces: Vec::new(),
-            // hand_pieces: Vec::new(),
             renderer,
-            cell_width: width / COLS,
-            cell_height: height / ROWS,
+            root_name,
+            rows,
+            cols,
+            cell_width: width / cols,
+            cell_height: height / rows,
             last_highlight: None,
         }
     }
 
     pub fn resize(&mut self) {
         let document = web_sys::window().unwrap().document().unwrap();
-        let board = document.get_element_by_id("board").unwrap();
+        let root: web_sys::HtmlElement = document
+            .get_element_by_id(self.root_name)
+            .unwrap()
+            .dyn_into()
+            .unwrap();
 
-        let width = board.client_width();
-        let height = board.client_height();
+        let width = root.client_width() as i32;
+        let height = root.client_height() as i32;
 
-        self.cell_width = width / COLS;
-        self.cell_height = height / ROWS;
+        self.cell_width = width / self.cols;
+        self.cell_height = height / self.rows;
+
+        crate::console_log!("new viewbox: ({}, {})", width, height);
 
         self.renderer.adjust_viewbox(0, 0, width, height);
         self.rerender();
@@ -63,10 +76,15 @@ impl Board {
         &mut self.grid
     }
 
+    pub fn remove_highlight(&mut self) {
+        self.last_highlight = None;
+        self.rerender();
+    }
+
     pub fn played_grid(&self) -> BTreeMap<Coord, Piece> {
         self.grid
             .iter()
-            .filter(|(Coord(_x, y), _)| *y < ROWS - 5)
+            .filter(|(Coord(_x, y), _)| *y < self.rows - 5)
             .map(|(Coord(x, y), p)| (Coord(*x, *y), *p))
             .collect()
     }
@@ -83,26 +101,9 @@ impl Board {
         }
     }
 
-    pub fn render_hand_line(&mut self) {
-        let grid_x_1 = 0;
-        let grid_y_1 = (ROWS - 5) * self.cell_height;
-        let grid_x_2 = COLS * self.cell_width;
-        let line = SVGElem::new(Tag::Line)
-            .set(Attr::X1, 0)
-            .set(Attr::Y1, -5)
-            .set(Attr::X2, grid_x_2)
-            .set(Attr::Y2, -5)
-            .set(Attr::Stroke, "black")
-            .set(Attr::StrokeWidth, 2);
-
-        self.renderer
-            .render(line, (grid_x_1 as f32, grid_y_1 as f32));
-    }
-
     pub fn rerender(&mut self) {
         self.renderer.clear();
         self.render();
-        self.render_hand_line();
     }
 
     pub fn render_pieces(&mut self, pieces: &[Piece]) {
@@ -129,15 +130,8 @@ impl Board {
         }
     }
 
-    pub fn in_hand(&self, grid_x: i32, grid_y: i32) -> bool {
-        grid_x >= 0 && grid_y >= ROWS - 5
-    }
-
-    pub fn world_in_hand(&self, world_x: i32, world_y: i32) -> bool {
-        let grid_x = world_x / self.cell_width;
-        let grid_y = world_y / self.cell_height;
-
-        self.in_hand(grid_x, grid_y)
+    pub fn contains(&self, coord: Coord) -> bool {
+        self.grid.contains_key(&coord)
     }
 
     pub fn world_contains(&self, world_x: i32, world_y: i32) -> bool {
@@ -189,24 +183,19 @@ impl Board {
         }
     }
 
-    pub fn remove_piece_at(&mut self, world_x: i32, world_y: i32) -> Option<(Piece, bool)> {
+    pub fn remove_piece_at(&mut self, world_x: i32, world_y: i32) -> Option<Piece> {
         let coord = self.world_to_grid(world_x, world_y);
-
-        let in_hand = coord.1 >= ROWS - 5;
-
-        self.grid.remove(&coord).map(|p| (p, in_hand))
-    }
-
-    pub fn grid_remove(&mut self, coord: Coord) -> Option<Piece> {
         self.grid.remove(&coord)
     }
 
-    pub fn world_insert(&mut self, world_x: i32, world_y: i32, piece: Piece) -> bool {
+    pub fn grid_remove(&mut self, coord: Coord) -> Option<Piece> {
+        crate::console_log!("grid_remove: {:?}, {:?}", coord, self.grid.get(&coord));
+        self.grid.remove(&coord)
+    }
+
+    pub fn world_insert(&mut self, world_x: i32, world_y: i32, piece: Piece) -> Option<Piece> {
         let coord = self.world_to_grid(world_x, world_y);
-
-        self.grid.insert(coord, piece);
-
-        coord.1 >= ROWS - 5
+        self.grid.insert(coord, piece)
     }
 
     pub fn grid_insert(&mut self, coord: Coord, piece: Piece) -> Option<Piece> {
@@ -221,34 +210,34 @@ impl Board {
             .iter()
             .filter(|p| p.color == Color::Black || p.color == Color::Joker);
 
-        for x in 0..COLS - 1 {
+        for x in 0..self.cols - 1 {
             if let Some(&p) = red.next() {
-                self.grid.insert(Coord(x, ROWS - 5), p);
+                self.grid.insert(Coord(x, 0), p);
             }
 
             if let Some(&p) = blue.next() {
-                self.grid.insert(Coord(x, ROWS - 4), p);
+                self.grid.insert(Coord(x, 1), p);
             }
 
             if let Some(&p) = yellow.next() {
-                self.grid.insert(Coord(x, ROWS - 3), p);
+                self.grid.insert(Coord(x, 2), p);
             }
 
             if let Some(&p) = black.next() {
-                self.grid.insert(Coord(x, ROWS - 2), p);
+                self.grid.insert(Coord(x, 3), p);
             }
         }
     }
 
     pub fn insert_into_hand(&mut self, piece: Piece) {
         let y = match piece.color {
-            Color::Red => ROWS - 5,
-            Color::Blue => ROWS - 4,
-            Color::Yellow => ROWS - 3,
-            Color::Black | Color::Joker => ROWS - 2,
+            Color::Red => 0,
+            Color::Blue => 1,
+            Color::Yellow => 2,
+            Color::Black | Color::Joker => 3,
         };
 
-        for x in 0..COLS - 1 {
+        for x in 0..self.cols - 1 {
             if !self.grid.contains_key(&Coord(x, y)) {
                 self.grid.insert(Coord(x, y), piece);
                 break;
@@ -278,13 +267,13 @@ impl AsSVG for Piece {
 
         let num = SVGElem::new(Tag::Text)
             .set(Attr::Fill, color)
-            .set(Attr::Transform, "scale(1, 2)")
+            .set(Attr::Transform, "scale(1, 1.5)")
             .set(Attr::X, width / 2)
-            .set(Attr::Y, height / 4)
+            .set(Attr::Y, height / 3)
             .set(Attr::DominantBaseline, "central")
             .set(Attr::TextAnchor, "middle")
             .set(Attr::Class, "piece_text")
-            .set(Attr::TextLength, width - 5)
+            .set(Attr::TextLength, width - (width / 5))
             .set(Attr::LengthAdjust, "spacingAndGlyphs")
             .set_inner(&number);
 

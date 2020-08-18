@@ -434,10 +434,12 @@ async fn handle_connection(
 
                 info!("created new room: {}", new_id);
 
-                join!(
+                let (_, res) = join!(
                     run_room(handle.clone(), recv),
                     run_player(addr, name, ws, handle)
                 );
+
+                res?;
 
                 info!("finished running room: {}", new_id);
 
