@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rummikub</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@500&display=swap" rel="stylesheet">
+    <script type="module">
+        import init from "/rkub_client.js";
+        import { run } from "/rkub_client.js";
+
+        async function start() {
+            await init();
+            let handle = run();
+        }
+        console.log("Executing WASM start()");
+        start();
+    </script>
+</head>
+
+<body>
+    <div id="create_or_join">
+        <form id="coj">
+            <fieldset>
+                <legend>Create or Join a Game Room of Rummikub!</legend>
+                <div>
+                    <input type="name" id="input_name" placeholder="Your Name" />
+                    <button type="button" id="create_room">Create Room</button>
+                </div>
+                <div>
+                    <input type="text" id="input_room" placeholder="Room ID" />
+                    <button type="button" id="join_room">Join Room</button>
+                </div>
+            </fieldset>
+        </form>
+    </div>
+
+    <div id="connecting" hidden>
+        Connecting
+    </div>
+
+    <div id="playing" hidden>
+        <div id="play_grid">
+            <div id="topbar">
+                <fieldset class="box">
+                    <legend>Room</legend>
+                    <div id="room">
+
+                    </div>
+                </fieldset>
+                <fieldset class="box">
+                    <legend>Current Player</legend>
+                    <div id="current_player">
+                        Fisher
+                    </div>
+                </fieldset>
+                <fieldset class="box">
+                    <legend>Last Player</legend>
+                    <div id="last_player">
+                        None
+                    </div>
+                </fieldset>
+                <fieldset class="box">
+                    <legend>Pieces Remaining</legend>
+                    <div id="pieces_remaining">
+                        104
+                    </div>
+                </fieldset>
+            </div>
+            <div id="game">
+                <fieldset id="board_box" class="box">
+                    <legend>Board</legend>
+                    <div id="board"></div>
+                </fieldset>
+                <fieldset id="hand_box" class="box">
+                    <legend>Hand</legend>
+                    <div id="hand"></div>
+                </fieldset>
+            </div>
+            <div id="sidebar">
+                <fieldset class="box">
+                    <legend>Players</legend>
+                    <div id="players">
+
+                    </div>
+                </fieldset>
+                <button id="end_turn" class="box">End Turn</button>
+            </div>
+            <div id="footer" class="box">
+                Footer
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>
