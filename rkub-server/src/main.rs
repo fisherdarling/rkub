@@ -443,6 +443,11 @@ async fn handle_connection(
 
                 info!("finished running room: {}", new_id);
 
+                let mut rooms = rooms.lock().await;
+                rooms.remove(&new_id);
+
+                info!("removed room: {}", new_id);
+
                 return Ok(());
 
                 // TODO: remove room

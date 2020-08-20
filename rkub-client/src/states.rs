@@ -701,9 +701,10 @@ impl Playing {
     }
 
     pub fn on_window_resize(&mut self) -> JsResult<()> {
-        console_log!("resize");
-        self.board.resize();
-        self.hand.resize();
+        // console_log!("resize");
+        // self.board.resize();
+        // self.hand.resize();
+        // Ok(())
         Ok(())
     }
 
