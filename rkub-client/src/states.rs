@@ -165,7 +165,17 @@ impl Connecting {
         let html = global.doc.get_element_by_id("connecting").unwrap();
         html.toggle_attribute("hidden")?;
 
-        let hostname = format!("{}://{}:{}", "ws", "localhost", "5555");
+        // Thanks mkeeter for the following hostname code:
+        let location = global.doc.location().expect("Could not get doc location");
+        let hostname = location.hostname()?;
+
+        // Pick the port based on the connection type
+        let (ws_protocol, ws_port) = if location.protocol()? == "https:" {
+            ("wss", 5556)
+        } else {
+            ("ws", 5555)
+        };
+        let hostname = format!("{}://{}:{}", ws_protocol, hostname, ws_port);
         console_log!("Host: {}", hostname);
 
         // Set up the websocket
