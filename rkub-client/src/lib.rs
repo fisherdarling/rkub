@@ -132,8 +132,8 @@ lazy_static::lazy_static! {
     pub static ref STATE: Mutex<State> = Mutex::new(State::Empty);
 }
 
-#[wasm_bindgen]
-pub fn run() -> JsResult<()> {
+#[wasm_bindgen(start)]
+pub fn main() -> JsResult<()> {
     console_error_panic_hook::set_once();
     wasm_logger::init(wasm_logger::Config::default());
 
