@@ -1,2 +1,0 @@
-[workspace]
-members = ["rkub-client", "rkub-server", "rkub-common"]
