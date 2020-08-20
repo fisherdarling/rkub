@@ -179,7 +179,7 @@ impl Game {
             remaining_pieces: Game::create_pieces(),
         };
 
-        // game.shuffle();
+        game.shuffle();
 
         game
     }
