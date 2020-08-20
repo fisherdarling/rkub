@@ -127,6 +127,7 @@ impl Room {
                 if drew {
                     if let Some(piece) = self.game.deal_piece() {
                         let msg = ServerMessage::DrawPiece(piece);
+                        self.players[self.connections[&addr]].hand.push(piece);
                         self.players[self.connections[&addr]].send_msg(msg).await;
                     } else {
                         drew = false;
