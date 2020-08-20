@@ -278,9 +278,7 @@ impl Room {
             return Ok(());
         }
 
-        // let hand = self.game.deal(14);
-
-        let hand = self.game.deal(28);
+        let hand = self.game.deal(6);
         let player = Player::new(name.to_string(), hand.clone(), ws_sender.clone());
 
         self.broadcast(ServerMessage::PlayerJoined(name.to_string()))
